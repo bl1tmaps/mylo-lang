@@ -106,6 +106,7 @@ int bound_ffi_count = 0;
 static char *src;
 static char *current_file_start = NULL;
 static Token curr;
+static Token prev_token;
 static bool inside_function = false;
 static char current_namespace[MAX_IDENTIFIER] = "";
 static int line = 1;
@@ -269,7 +270,7 @@ void emit(int op) {
         mylo_exit(1);
     }
     compiling_vm->bytecode[compiling_vm->code_size] = op;
-    compiling_vm->lines[compiling_vm->code_size] = curr.line > 0 ? curr.line : line;
+    compiling_vm->lines[compiling_vm->code_size] = prev_token.line > 0 ? prev_token.line : line;
     compiling_vm->code_size++;
 }
 
@@ -460,6 +461,7 @@ void emit_continue() {
 }
 
 void next_token() {
+    prev_token = curr;
     while (1) {
         unsigned char c = (unsigned char) *src;
         if (isspace(c)) {

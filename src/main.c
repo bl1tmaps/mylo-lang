@@ -361,7 +361,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--run") == 0) build_mode = false;
         else if (strcmp(argv[i], "--dump") == 0) dump = true;
         else if (strcmp(argv[i], "--trace") == 0) trace = true;
-        else if (strcmp(argv[i], "--dap") == 0) debug_mode = true;
+        else if (strcmp(argv[i], "--dap") == 0) { debug_mode = true; MyloConfig.debug_mode = true; }
         else if (strcmp(argv[i], "--db") == 0) cli_debug_mode = true;
         else if (strcmp(argv[i], "--version") == 0) version = true;
         else if (strcmp(argv[i], "--repl") == 0) repl_mode = true;
@@ -391,7 +391,7 @@ int main(int argc, char** argv) {
 
     char* content = read_file(fn);
     if (!content) {
-        printf("Error: Cannot read file %s\n", fn);
+        fprintf(stderr, "Error: Cannot read file %s\n", fn);
         return 1;
     }
 

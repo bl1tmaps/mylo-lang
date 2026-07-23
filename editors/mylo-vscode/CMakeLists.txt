@@ -24,6 +24,9 @@ target_include_directories(mylo PRIVATE ../../src)
 add_executable(mylo-lsp ../../lsp/mylo_lsp.c ${CORE_SRC})
 target_include_directories(mylo-lsp PRIVATE ../../src)
 
+# Build mylo-vsproject
+add_executable(mylo-vsproject ../../tools/mylo-vsproject.cpp)
+
 if (WIN32)
     target_link_libraries(mylo ws2_32)
     target_link_libraries(mylo-lsp ws2_32)
@@ -36,7 +39,7 @@ endif()
 add_custom_target(package-vsix
     COMMAND npm install
     COMMAND npx vsce package
-    DEPENDS mylo mylo-lsp
+    DEPENDS mylo mylo-lsp mylo-vsproject
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMENT "Packaging VSCode Extension..."
 )

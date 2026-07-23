@@ -51,6 +51,19 @@ const char* get_function_name(VM* vm, int ip) {
 }
 
 // --- JSON Helpers ---
+void escape_json_string(const char* input, char* output) {
+    while (*input) {
+        if (*input == '"') { *output++ = '\\'; *output++ = '"'; }
+        else if (*input == '\\') { *output++ = '\\'; *output++ = '\\'; }
+        else if (*input == '\n') { *output++ = '\\'; *output++ = 'n'; }
+        else if (*input == '\r') { *output++ = '\\'; *output++ = 'r'; }
+        else if (*input == '\t') { *output++ = '\\'; *output++ = 't'; }
+        else { *output++ = *input; }
+        input++;
+    }
+    *output = '\0';
+}
+
 void send_json(const char* content) {
     int len = strlen(content);
     log_debug("<< Sending: %s", content); // Log outgoing
@@ -63,6 +76,15 @@ void send_event(const char* event, const char* body_json) {
     snprintf(buf, 4096, "{\"jsonrpc\": \"2.0\", \"type\": \"event\", \"event\": \"%s\", \"body\": %s}", event, body_json);
     send_json(buf);
 }
+
+void dap_print_callback(const char* str) {
+    char escaped[4096];
+    escape_json_string(str, escaped);
+    char buf[4096 + 128];
+    snprintf(buf, sizeof(buf), "{\"category\": \"stdout\", \"output\": \"%s\"}", escaped);
+    send_event("output", buf);
+}
+
 
 void send_response(int seq, const char* command, const char* body_json) {
     char buf[8192];
@@ -112,18 +134,35 @@ void run_debug_session(VM* vm, bool step_mode) {
 }
 
 // --- Main Adapter Loop ---
-void start_debug_adapter(VM* vm, const char* filename, char* source_content) {
-    // Force Binary Mode on Windows to prevent \r\n translation issues
-    #ifdef _WIN32
+static VM* vm;
+static const char* source;
+
+void dap_error_callback(const char* str) {
+    char escaped[4096];
+    escape_json_string(str, escaped);
+    char buf[4096 + 128];
+    snprintf(buf, sizeof(buf), "{\"category\": \"stderr\", \"output\": \"%s\\n\"}", escaped);
+    send_event("output", buf);
+}
+
+void start_debug_adapter(VM* vm_in, const char* filename, const char* source_content) {
+    vm = vm_in;
+    source = source_content;
+
+    // Use binary mode for stdin/stdout to prevent \r\n issues on Windows
+#ifdef _WIN32
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
     _setmode(_fileno(stderr), _O_BINARY);
-    #endif
+#endif
 
     // Unbuffer stderr so logs appear instantly
     setvbuf(stderr, NULL, _IONBF, 0);
 
     log_debug("Adapter Started. Waiting for handshake...");
+
+    MyloConfig.print_callback = dap_print_callback;
+    MyloConfig.error_callback = dap_error_callback;
 
     if (filename) strcpy(current_source_path, filename);
     else strcpy(current_source_path, "unknown.mylo");
@@ -224,8 +263,11 @@ void start_debug_adapter(VM* vm, const char* filename, char* source_content) {
                 int line = (vm->lines && vm->ip > 0) ? vm->lines[vm->ip] : 1;
                 const char* fn = get_function_name(vm, vm->ip);
 
+                char escaped_path[4096];
+                escape_json_string(current_source_path, escaped_path);
+
                 snprintf(stack, 4096, "{\"stackFrames\": [{\"id\": 1, \"name\": \"%s\", \"source\": {\"name\": \"%s\", \"path\": \"%s\"}, \"line\": %d, \"column\": 1}], \"totalFrames\": 1}",
-                    fn, "source.mylo", current_source_path, line);
+                    fn, "source.mylo", escaped_path, line);
                 send_response(seq, command, stack);
             }
             else if (strcmp(command, "scopes") == 0) {

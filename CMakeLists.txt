@@ -18,6 +18,7 @@ add_executable(tests tests/tests.cpp src/compiler.c src/vm.h src/vm.c
         src/mylolib.c
         src/debug_adapter.c
 )
+add_executable(mylo-vsproject tools/mylo-vsproject.cpp)
 IF (WIN32)
   # Math not needed on Windows
 
