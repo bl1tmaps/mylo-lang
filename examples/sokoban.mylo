@@ -1,5 +1,4 @@
 // Variables that will survive specific scope changes
-// will live in this region.
 // --- Constants for Grid Objects ---
 var EMPTY = 0
 var WALL = 1
@@ -27,8 +26,8 @@ fn init_level() {
     var w = 8
     var h = 8
     
-    // 2. Allocate 'data' into the LevelMem region using '::'
-    // This ensures the array survives after this function returns.
+    // 2. Allocate 'data'.
+    // The GC will manage it automatically.
     var data = [
         1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 0, 0, 0, 1, 1,
@@ -63,6 +62,19 @@ fn get_cell(state: GameState, x: num, y: num) {
         ret WALL // Treat out of bounds as wall
     }
     var idx = (y * state.width) + x
+    if (idx < 0 || idx >= len(state.grid)) {
+        print("CRASH IMMINENT!")
+        print("x:")
+        print(x)
+        print("y:")
+        print(y)
+        print("width:")
+        print(state.width)
+        print("idx:")
+        print(idx)
+        print("len:")
+        print(len(state.grid))
+    }
     ret state.grid[idx]
 }
 
@@ -225,7 +237,7 @@ fn main() {
             
             // Reset
             if (k == "r") {
-                // Clear the LevelMem region to prevent memory leaks 
+                // The GC will handle memory cleanup
                 // before creating a new level.
                 game = init_level()
                 input_processed = 1

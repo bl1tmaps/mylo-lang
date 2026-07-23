@@ -1,52 +1,43 @@
 // --- Threading Test Program ---
 
-// Create a region for the job
-// 'Regions' are just bags of memory that can
-// be passed around in a safe manner.
-region job_mem
-
-// ! WARNING !
-// Only array objects (Heap Objects) are persistent between threads
-// This means that 'input' below can be read by a worker thread,
-// but if it is written to, that will non persist when the thread dies.
-
-var job_mem::result = [0]   // <-- This is an array, and will survive assignments between threads
-var job_mem::input = 0      // <-- This is read-only (it can be written to for in-thread use, but it will not persist thread exit).
+// Mylo uses isolated memory for workers (each thread has its own VM).
+// To pass variables back and forth safely, we use the `bus`.
 
 // 1. Define the function that will run in the thread
 fn worker_task() {
     print("  [Worker] Thread started. Processing...")
-    print(f" [Worker] Input Loops : {job_mem::input}")
+    
+    // Get input from the bus
+    var input = bus_get("job_input")
+    print(f" [Worker] Input Loops : {input}")
 
     // Simulate heavy work
     var total = 0
-    for (var i in 0...job_mem::input) {
+    for (var i in 0...input) {
         total = total + 1
     }
     
-    // Store the result in the shared region 'job_mem'
-    job_mem::result[0] = total
+    // Store the result on the bus so the main thread can read it
+    bus_set("job_result", total)
     
     print("  [Worker] Done! Result stored.")
-    // We need to access result[0], otherwise we will get it's memory
-    // location.
-    print(f" [Worker] Result Stored {job_mem::result[0]}")
+    print(f" [Worker] Result Stored {total}")
 }
 
 // 2. Main Program
 print("[Main] Initializing...")
 
-
 // Here we define the number of iterations
-// Note: see how this is defined set after the function has been compiled.
-job_mem::input = 100
+var input = 100
+// Pass it to the bus
+bus_set("job_input", input)
 
 // Spawn the worker
-// create_worker(region_id, function_name)
-// CRITICAL: This MOVES ownership of 'job_mem' to the worker.
-// The main thread cannot access 'job_mem' variables until dock_worker is called.
+// create_worker(function_name)
+// CRITICAL: The worker receives a fresh copy of all globals and strings
+// from the main VM, but subsequent changes are isolated.
 print("[Main] Spawning worker...")
-var worker_id = create_worker(job_mem, "worker_task")
+var worker_id = create_worker("worker_task")
 
 if (worker_id < 0) {
     print("[Main] Failed to create worker!")
@@ -72,22 +63,18 @@ if (worker_id < 0) {
     }
     
     // Dock the worker
-    // This joins the thread and MOVES the 'job_mem' region back to main.
+    // This joins the thread and cleans up the worker VM.
     print("[Main] Docking worker...")
     dock_worker(worker_id)
 
 
-    // Now that we have the region back, we can read the values
-    // that the worker created.
+    // Now we can read the values that the worker created.
     print("[Main] Retrieving result from worker memory...")
-    var res :i32 = job_mem::result[0]
-    print(f"[Main] Calculation Result: {to_string(res)}, target: {job_mem::input+1}")
-    if (res == (job_mem::input + 1)) {
+    var res :i32 = bus_get("job_result")
+    print(f"[Main] Calculation Result: {to_string(res)}, target: {input+1}")
+    if (res == (input + 1)) {
         print("[Main] SUCCESS: Threading working correctly.")
     } else {
         print("[Main] FAILURE: Result incorrect.")
     }
-    
-    // Cleanup
-    clear(job_mem)
 }

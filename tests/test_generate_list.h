@@ -29,7 +29,7 @@ inline TestOutput test_test() {
 }
 
 inline TestOutput test_hello_world() {
-    VM vm;
+    VM vm = {0};
     vm_init(&vm);
     MyloConfig.print_to_memory = true;
 
@@ -1129,73 +1129,19 @@ inline TestOutput test_strong_types_list() {
 }
 
 
-inline TestOutput test_region() {
-    std::string src = """"
-    "region foo\n"
-    "var x = 99\n"
-    "var foo::x = 2\n"
-    "print(foo::x)\n";
-    std::string expected = """"
-        "2\n";
-    return run_source_test(src, expected);
-}
-
-
-inline TestOutput test_region_scoping() {
-    std::string src = """"
-    "region foo\n"
-    "var foo::x = range(0,5,99999)\n"
-    "fn bar() {\n"
-    "for (x in 0...10) {\n"
-    "for (y in 0...10) {}\n"
-    "}}\n"
-    "bar()\n"
-    "clear(foo)\n"
-    "print(1)";
-    std::string expected = """"
-        "1\n";
-    auto x = run_source_test(src, expected, false);
-    if (test_vm.arenas[1].head != 0) {
-        x.result = false;
-        x.result_string = "Expected region Foo to be cleared.";
-    };
-    if (test_vm.arenas[0].head != 0) {
-        x.result = false;
-        x.result_string = "Expected main region scoping to clear memory from bar";
-    }
-    // Cleanup after ourselves
-    vm_cleanup(&test_vm);
-    return x;
-}
+// Region tests removed because GC supersedes regions
 
 inline TestOutput test_loop_scoping() {
-    std::string src = """"
+    std::string src = 
     "var x = 0\n"
     "forever {var f = range(0,1,1000)\n x = x + 1 \n if (x > 2) {break}}\n"
     "x = 0 \n for (f in range(0,1,1000)){\n x = x + 1 \n if (x > 2) {break}}\n"
     "print(1)";
-    std::string expected = """"
+    std::string expected = 
         "1\n";
     auto x = run_source_test(src, expected, false);
-    if (test_vm.arenas[0].head != 0) {
-        x.result = false;
-        x.result_string = "Expected main region scoping to clear memory from bar, and got " + std::to_string(test_vm.arenas[0].head);
-    }
-    // Cleanup after ourselves
     vm_cleanup(&test_vm);
     return x;
-}
-
-
-inline TestOutput test_region_same_name() {
-    std::string src = """"
-    "region foo\n"
-    "var foo::x = 2\n"
-    "var x = 88"
-    "print(x)\n";
-    std::string expected = """"
-        "88\n";
-    return run_source_test(src, expected);
 }
 
 inline TestOutput test_strong_types_i() {
@@ -1234,73 +1180,41 @@ inline TestOutput test_typed_struct() {
 }
 
 inline TestOutput test_thread() {
-    std::string src = """"
-    "region foo\n"
-    "var foo::x = [0]\n"
-    "fn foo_1() {foo::x[0] = 100}\n"
-    "var worker_id = create_worker(foo, \"foo_1\")\n"
-    "if (worker_id < 0) {print(1)}\n"
+    std::string src = 
+    "bus_set(\"input\", 100)\n"
+    "fn foo_1() {\n"
+    "   var input = bus_get(\"input\")\n"
+    "   bus_set(\"result\", input + 42)\n"
+    "}\n"
+    "var worker_id = create_worker(\"foo_1\")\n"
+    "if (worker_id < 0) {print(-1)}\n"
     "var running = 1\n forever { if (running != 1) { break } \n  var status = check_worker(worker_id) \n"
     "if (status == 1) { running = 0} }\n"
     "dock_worker(worker_id)\n"
-    "print(foo::x)";
-    std::string expected = """"
-        "[100]\n"; // As it is an array, it is promoted to num array :')
+    "print(bus_get(\"result\"))";
+    std::string expected = 
+        "142\n";
     return run_source_test(src, expected);
 }
 
 inline TestOutput test_bus() {
-    std::string src = """"
-    "region foo\n"
-    "var foo::x = [0]\n"
-    "fn foo_1() {foo::x[0] = 100\n bus_set(\"test\", 42)}\n"
-    "var worker_id = create_worker(foo, \"foo_1\")\n"
-    "if (worker_id < 0) {print(1)}\n"
+    std::string src = 
+    "fn foo_1() {\n"
+    "   bus_set(\"test\", 42)\n"
+    "}\n"
+    "var worker_id = create_worker(\"foo_1\")\n"
+    "if (worker_id < 0) {print(-1)}\n"
     "var running = 1\n forever { if (running != 1) { break } \n  var status = check_worker(worker_id) \n"
     "if (status == 1) { running = 0} }\n"
     "dock_worker(worker_id)\n"
     "var t = bus_get(\"test\")\n"
-    "print(foo::x + t)";
-    std::string expected = """"
-        "[142]\n"; // As it is an array, it is promoted to num array :')
+    "print(t)";
+    std::string expected = 
+        "42\n"; 
     return run_source_test(src, expected);
 }
 
-inline TestOutput test_iterator_from_region_in_func() {
-
-    std::string src = """"
-    "region foo\n"
-    "var foo::dim = 3\n"
-    "fn bar() {\n"
-    "for (var x in 0...foo::dim) {\n"
-        "print(x)\n"
-    "}\n"
-    "}"
-    "bar()";
-
-    std::string expected = """"
-    "0\n1\n2\n3\n";
-
-    return run_source_test(src, expected);
-}
-
-inline TestOutput test_nested_iterator_from_region_in_func() {
-
-    std::string src = """"
-    "region foo\n"
-    "var foo::dim = 3\n"
-    "fn bar() {\n"
-    "for (var x in 0...foo::dim) {\n"
-        "print(x)\n"
-    "}\n"
-    "}"
-    "fn goo() { bar()}\n goo()";
-
-    std::string expected = """"
-    "0\n1\n2\n3\n";
-
-    return run_source_test(src, expected);
-}
+// Region tests removed because GC supersedes regions
 
 inline TestOutput test_nested_for_loop() {
 
@@ -1568,6 +1482,28 @@ inline TestOutput test_enum_iter() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_oo() {
+    std::string src = 
+    "struct Point {\n"
+    "    var x\n"
+    "    var y\n"
+    "    fn get_x(self) {\n"
+    "        ret self.x\n"
+    "    }\n"
+    "    fn distance(self, other: Point) {\n"
+    "        ret self.x + self.y + other.x + other.y\n"
+    "    }\n"
+    "}\n"
+    "var p1 : Point = { x=1, y=2 }\n"
+    "var p2 : Point = { x=3, y=4 }\n"
+    "print(p1.get_x())\n"
+    "print(p1.distance(p2))\n";
+    std::string expected = """"
+        "1\n"
+        "10\n";  
+    return run_source_test(src, expected);
+}
+
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
     ADD_TEST("Test Print", test_hello_world);
@@ -1641,17 +1577,12 @@ inline void test_generate_list() {
     ADD_TEST("Test Math mix", test_mix);
     ADD_TEST("Test Min-Max Array", test_list_min_max);
     ADD_TEST("Test Strongly Types Arrays", test_strong_types_list);
-    ADD_TEST("Test Region", test_region);
-    ADD_TEST("Test Region Same Name", test_region_same_name);
-    ADD_TEST("Test Region Scoping", test_region_scoping);
     ADD_TEST("Test Loop Scoping", test_loop_scoping);
     ADD_TEST("Test Strong Types ints", test_strong_types_i);
     ADD_TEST("Test String Types Promotion byte -> num", test_type_promototion_bool);
     ADD_TEST("Test Vector(byte) (add())", test_vector_byte_add);
     ADD_TEST("Test Threading...", test_thread);
     ADD_TEST("Test Bus...", test_bus);
-    ADD_TEST("Test Iterator in Func from Region", test_iterator_from_region_in_func);
-    ADD_TEST("Test Iterator in Func from Region Nest", test_nested_iterator_from_region_in_func);
     ADD_TEST("Test Forever Stack Leak", test_forever_stack_leak);
     ADD_TEST("Test Nested Scope Conditional Return", test_nested_scope_conditional_return);
     ADD_TEST("Test Nested For Loop", test_nested_for_loop);
@@ -1663,6 +1594,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Enum String Representation", test_enum_string_repl);
     ADD_TEST("Test Enum Iteration", test_enum_iter);
     ADD_TEST("Test Type Inference (type())", test_type_infer);
+    ADD_TEST("Test Object Orientation", test_oo);
 
 }
 

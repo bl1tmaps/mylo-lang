@@ -842,17 +842,16 @@ for (k in inputs) {
 ```
 
 <a name="multithreading"></a>
-## Multithreading
+## Threading (Workers)
 
-Mylo implements a **Move Semantics** concurrency model. This allows for safe threading without locks or mutexes.
+> [!WARNING]
+> **DEPRECATED**: The worker and threading model in Mylo was previously based on Region memory ownership transfer. With the introduction of the new Mark-and-Sweep Garbage Collector, the isolated region-based threading model has been deprecated. Workers and the Universal Bus are currently non-functional and will be rewritten in a future release to support concurrent GC.
 
-**How it works:**
-1. You create a `region` of memory.
-2. You call `create_worker`, passing that region to a new thread.
-3. **Important:** The main thread **loses access** to that region. It effectively "gives" the memory to the worker.
-4. The worker runs, modifying data inside that region.
-5. You call `dock_worker` to join the thread.
-6. The main thread **regains access** to the region and sees the updated data.
+The documentation below describes the **legacy** behavior of Mylo workers.
+
+In Mylo, true multi-threading was achieved using **Workers**. A worker is a completely isolated VM instance running on a background OS thread. Because they share nothing by default, there are no race conditions or need for locks on standard variables.
+
+To share data between the main thread and a worker, you transferred ownership of a memory region.
 
 <a name="create_workerregion-num-function-str-num"></a>
 ### `create_worker(region: region, function_name: str) -> num`

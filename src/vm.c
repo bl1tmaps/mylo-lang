@@ -116,113 +116,7 @@ unsigned long vm_hash_str(const char *str) {
 
 // [REPLACEMENT] Recursive Deep Evacuation
 double vm_evacuate_object(VM* vm, double ptr_val, int target_head) {
-    if (ptr_val == 0) return 0;
-
-    double* old_base = vm_resolve_ptr_safe(vm, ptr_val);
-    if (!old_base) return ptr_val; // Invalid or already handled
-
-    int arena_id = UNPACK_ARENA(ptr_val);
-    int offset = UNPACK_OFFSET(ptr_val);
-
-    // 1. Safety Check: If object is already "older" than the rewind point, it's safe.
-    if (offset < target_head) return ptr_val;
-
-    int type = (int)old_base[0];
-    int size = 0;
-
-    // 2. Calculate Size
-    if (type == TYPE_MAP) {
-        size = 4; // Map Header Size
-    } else if (type == TYPE_BYTES) {
-        int len = (int)old_base[1];
-        size = ((len + 7) / 8) + 2;
-    } else if (type == TYPE_ARRAY || (type >= TYPE_BOOL_ARRAY && type <= TYPE_I64_ARRAY)) {
-        int len = (int)old_base[1];
-        if (type == TYPE_ARRAY) size = len + 2;
-        else {
-            int elem_size = get_type_size(type);
-            size = ((len * elem_size + 7) / 8) + 2;
-        }
-    } else if (type >= 0) {
-        // Structs
-        size = (int)old_base[1] + 2;
-    }
-
-    if (size <= 0) return ptr_val;
-
-    // 3. Move the Object (Evacuate)
-    // IMPORTANT: We allocate at the CURRENT head of the arena, because
-    // recursive calls might have already advanced it.
-    int current_head = vm->arenas[arena_id].head;
-
-    // However, for the ROOT object (first call), we strictly want it at target_head?
-    // Actually, checking if (current_head < target_head) covers the rewind case.
-    // We just append to wherever 'head' currently is.
-    // NOTE: OP_RET sets head = target_head BEFORE calling this.
-    // So current_head IS target_head initially.
-
-    double* new_loc = &vm->arenas[arena_id].memory[current_head];
-    int* new_types = &vm->arenas[arena_id].types[current_head];
-    int* old_types = vm->arenas[arena_id].types + offset;
-
-    memmove(new_loc, old_base, size * sizeof(double));
-    memmove(new_types, old_types, size * sizeof(int));
-
-    double new_ptr = PACK_PTR(vm->arenas[arena_id].generation, arena_id, current_head);
-    vm->arenas[arena_id].head += size; // Advance head immediately
-
-    // 4. RECURSION: Deep Copy Children
-    // We pass 'target_head' (the boundary) to children so they know if THEY need moving.
-
-    if (type == TYPE_ARRAY) {
-        int len = (int)new_loc[1];
-        for (int i = 0; i < len; i++) {
-            if (new_types[HEAP_HEADER_ARRAY + i] == T_OBJ) {
-                // Recursively evacuate the child.
-                // Note: This will append the child to the end of the heap (moving head forward).
-                new_loc[HEAP_HEADER_ARRAY + i] = vm_evacuate_object(vm, new_loc[HEAP_HEADER_ARRAY + i], target_head);
-            }
-        }
-    } else if (type == TYPE_MAP) {
-        // Maps have a 'data' pointer at index 3 which is a raw array.
-        // We must evacuate that raw block manually as it has no header.
-        int cap = (int)new_loc[1];
-        double old_data_ptr = new_loc[3];
-        double* old_data_base = vm_resolve_ptr_safe(vm, old_data_ptr);
-
-        if (old_data_base && UNPACK_OFFSET(old_data_ptr) >= target_head) {
-            int data_size = cap * 2;
-            int data_head = vm->arenas[arena_id].head;
-
-            double* new_data_loc = &vm->arenas[arena_id].memory[data_head];
-            int* new_data_types = &vm->arenas[arena_id].types[data_head];
-            int* old_data_types = vm_resolve_type(vm, old_data_ptr);
-
-            memmove(new_data_loc, old_data_base, data_size * sizeof(double));
-            memmove(new_data_types, old_data_types, data_size * sizeof(int));
-
-            double new_data_ref = PACK_PTR(vm->arenas[arena_id].generation, arena_id, data_head);
-            vm->arenas[arena_id].head += data_size;
-            new_loc[3] = new_data_ref; // Update Map's data pointer
-
-            // Recurse on values inside the map
-            for(int i=0; i<data_size; i++) {
-                if (new_data_types[i] == T_OBJ) {
-                    new_data_loc[i] = vm_evacuate_object(vm, new_data_loc[i], target_head);
-                }
-            }
-        }
-    } else if (type >= 0) { // Struct
-        int struct_size = (int)new_loc[1];
-        for (int i = 0; i < struct_size; i++) {
-            // Struct fields start at index 2
-            if (new_types[2 + i] == T_OBJ) {
-                new_loc[2 + i] = vm_evacuate_object(vm, new_loc[2 + i], target_head);
-            }
-        }
-    }
-
-    return new_ptr;
+    return ptr_val; // Evacuation not needed with GC
 }
 #define MAX_REFS 1024
 typedef struct {
@@ -275,54 +169,87 @@ void vm_free_ref(VM* vm, int id) {
 }
 
 double* vm_resolve_ptr_safe(VM* vm, double ptr_val) {
-    int id = UNPACK_ARENA(ptr_val);
     int offset = UNPACK_OFFSET(ptr_val);
-    int gen = UNPACK_GEN(ptr_val);
-
-    if (id < 0 || id >= MAX_ARENAS) return NULL;
-    if (!vm->arenas[id].active) return NULL;
-    if (vm->arenas[id].generation != gen) return NULL;
-    if (offset < 0 || offset >= vm->arenas[id].capacity) return NULL;
-
-    return &vm->arenas[id].memory[offset];
+    if (offset < 0 || offset >= vm->heap.capacity) return NULL;
+    if (vm->heap.memory[offset] == NULL) return NULL;
+    return vm->heap.memory[offset];
 }
 
-// --- Arena & Memory Management ---
+// --- GC Management ---
 
-void init_arena(VM* vm, int id) {
-    if (id < 0 || id >= MAX_ARENAS) return;
-
-    vm->arenas[id].generation = (vm->arenas[id].generation + 1) & 0x3FFF;
-    if (vm->arenas[id].generation == 0) vm->arenas[id].generation = 1;
-
-    if (vm->arenas[id].memory == NULL) {
-        vm->arenas[id].capacity = MAX_HEAP;
-        // Use calloc for safety (zeroed memory) on NEW allocations
-        vm->arenas[id].memory = (double*)calloc(MAX_HEAP, sizeof(double));
-        vm->arenas[id].types = (int*)calloc(MAX_HEAP, sizeof(int));
-    }
-
-    vm->arenas[id].head = 0;
-    vm->arenas[id].active = true;
-
-    if (!vm->arenas[id].memory || !vm->arenas[id].types) {
-        fprintf(stderr, "Critical: Failed to allocate Arena %d\n", id);
-        mylo_exit(1);
+static void mark_object(VM* vm, double ptr_val) {
+    int offset = UNPACK_OFFSET(ptr_val);
+    if (offset < 0 || offset >= vm->heap.capacity) return;
+    if (vm->heap.memory[offset] == NULL || vm->heap.marked[offset]) return;
+    
+    vm->heap.marked[offset] = 1;
+    
+    // Trace children if it's an array or map
+    double* base = vm->heap.memory[offset];
+    int obj_type = (int)base[HEAP_OFFSET_TYPE];
+    
+    if (obj_type == TYPE_ARRAY) {
+        int len = (int)base[HEAP_OFFSET_LEN];
+        for (int i=0; i<len; i++) {
+            if (vm->heap.types[offset][HEAP_HEADER_ARRAY + i] == T_OBJ) {
+                mark_object(vm, base[HEAP_HEADER_ARRAY + i]);
+            }
+        }
+    } else if (obj_type == TYPE_MAP) {
+        int cap = (int)base[HEAP_OFFSET_CAP];
+        int header_offset = HEAP_HEADER_MAP;
+        for (int i = 0; i < cap; i++) {
+            int key_type = vm->heap.types[offset][header_offset + (i * 2)];
+            int val_type = vm->heap.types[offset][header_offset + (i * 2) + 1];
+            double key = base[header_offset + (i * 2)];
+            double val = base[header_offset + (i * 2) + 1];
+            
+            if (key_type == T_OBJ && key != 0.0) mark_object(vm, key);
+            if (val_type == T_OBJ && val != 0.0) mark_object(vm, val);
+        }
+    } else if (obj_type >= 0) {
+        // It's a struct! struct_id is obj_type, size is at base[1]
+        int len = (int)base[1];
+        for (int i = 0; i < len; i++) {
+            if (vm->heap.types[offset][2 + i] == T_OBJ) {
+                mark_object(vm, base[2 + i]);
+            }
+        }
     }
 }
 
-void free_arena(VM* vm, int id) {
-    if (id < 0 || id >= MAX_ARENAS) return;
-    if (vm->arenas[id].memory) {
-        free(vm->arenas[id].memory);
-        vm->arenas[id].memory = NULL;
+void gc_mark(VM* vm) {
+    // 1. Mark Stack
+    for (int i = 0; i <= vm->sp; i++) {
+        if (vm->stack_types[i] == T_OBJ) mark_object(vm, vm->stack[i]);
     }
-    if (vm->arenas[id].types) {
-        free(vm->arenas[id].types);
-        vm->arenas[id].types = NULL;
+    // 2. Mark Globals
+    if (vm->global_symbol_count > 0) {
+        for (int i = 0; i < MAX_GLOBALS; i++) {
+            if (vm->global_types[i] == T_OBJ) mark_object(vm, vm->globals[i]);
+        }
     }
-    vm->arenas[id].active = false;
-    vm->arenas[id].head = 0;
+}
+
+void gc_sweep(VM* vm) {
+    for (int i = 0; i < vm->heap.capacity; i++) {
+        if (vm->heap.memory[i] != NULL) {
+            if (!vm->heap.marked[i]) {
+                free(vm->heap.memory[i]);
+                free(vm->heap.types[i]);
+                vm->heap.memory[i] = NULL;
+                vm->heap.types[i] = NULL;
+                vm->heap.sizes[i] = 0;
+                vm->heap.count--;
+            }
+        }
+        vm->heap.marked[i] = 0; // Clear mark bits for next GC
+    }
+}
+
+void gc_collect(VM* vm) {
+    gc_mark(vm);
+    gc_sweep(vm);
 }
 
 void vm_cleanup(VM* vm) {
@@ -334,7 +261,16 @@ void vm_cleanup(VM* vm) {
     if (vm->global_types) { free(vm->global_types); vm->global_types = NULL; }
     if (vm->constants) { free(vm->constants); vm->constants = NULL; }
 
-    for (int i = 0; i < MAX_ARENAS; i++) free_arena(vm, i);
+    for (int i = 0; i < vm->heap.capacity; i++) {
+        if (vm->heap.memory[i]) {
+            free(vm->heap.memory[i]);
+            free(vm->heap.types[i]);
+        }
+    }
+    if (vm->heap.memory) free(vm->heap.memory);
+    if (vm->heap.types) free(vm->heap.types);
+    if (vm->heap.sizes) free(vm->heap.sizes);
+    if (vm->heap.marked) free(vm->heap.marked);
     if (vm->string_pool) { free(vm->string_pool); vm->string_pool = NULL; }
 
     for (int i = 0; i < ref_next_id; i++) {
@@ -390,29 +326,19 @@ void vm_init(VM* vm) {
         }
         ref_next_id = 0;
 
-        // 4. Reset Arena 0 (Main Heap) - Reuse Memory!
-        // We only zero the portion that was used (`head`), not the whole capacity.
-        if (vm->arenas[0].memory) {
-            size_t used_doubles = vm->arenas[0].head;
-            if (used_doubles > 0) {
-                memset(vm->arenas[0].memory, 0, used_doubles * sizeof(double));
-                memset(vm->arenas[0].types, 0, used_doubles * sizeof(int));
+        // 4. Reset GC Heap
+        for (int i = 0; i < vm->heap.capacity; i++) {
+            if (vm->heap.memory[i]) {
+                free(vm->heap.memory[i]);
+                free(vm->heap.types[i]);
+                vm->heap.memory[i] = NULL;
+                vm->heap.types[i] = NULL;
+                vm->heap.sizes[i] = 0;
             }
-            // Logic from init_arena logic, manually applied for speed
-            vm->arenas[0].generation = (vm->arenas[0].generation + 1) & 0x3FFF;
-            if (vm->arenas[0].generation == 0) vm->arenas[0].generation = 1;
-            vm->arenas[0].head = 0;
-            vm->arenas[0].active = true;
-        } else {
-            // Fallback if Arena 0 was manually freed for some reason
-            init_arena(vm, 0);
         }
-
-        // 5. Free Extra Regions (Tests expect a clean slate)
-        for (int i = 1; i < MAX_ARENAS; i++) {
-            free_arena(vm, i);
-        }
-        vm->current_arena = 0;
+        memset(vm->heap.marked, 0, vm->heap.capacity);
+        vm->heap.count = 0;
+        vm->heap.next_free = 0;
 
         // 6. Clear Debug Symbols (Compiler re-allocates these)
         if (vm->global_symbols) { free(vm->global_symbols); vm->global_symbols = NULL; }
@@ -434,10 +360,13 @@ void vm_init(VM* vm) {
 
     vm->constants = (double*)malloc(MAX_CONSTANTS * sizeof(double));
     vm->string_pool = malloc(MAX_STRINGS * MAX_STRING_LENGTH);
-    memset(vm->arenas, 0, sizeof(vm->arenas));
-
-    init_arena(vm, 0);
-    vm->current_arena = 0;
+    vm->heap.capacity = 1024; // Start small, grow dynamically
+    vm->heap.memory = (double**)calloc(vm->heap.capacity, sizeof(double*));
+    vm->heap.types = (int**)calloc(vm->heap.capacity, sizeof(int*));
+    vm->heap.sizes = (int*)calloc(vm->heap.capacity, sizeof(int));
+    vm->heap.marked = (char*)calloc(vm->heap.capacity, sizeof(char));
+    vm->heap.count = 0;
+    vm->heap.next_free = 0;
 
     if (!vm->bytecode || !vm->stack) {
         fprintf(stderr, "Critical Error: Failed to allocate VM memory\n");
@@ -467,51 +396,76 @@ void vm_init(VM* vm) {
 }
 
 double* vm_resolve_ptr(VM* vm, double ptr_val) {
-    int id = UNPACK_ARENA(ptr_val);
     int offset = UNPACK_OFFSET(ptr_val);
-    int gen = UNPACK_GEN(ptr_val);
-
-    if (id < 0 || id >= MAX_ARENAS) {
-        RUNTIME_ERROR("Access violation: Invalid Region ID %d", id);
+    if (offset < 0 || offset >= vm->heap.capacity) {
+        RUNTIME_ERROR("Access violation: Invalid GC Pointer %d", offset);
         return NULL;
     }
-    if (!vm->arenas[id].active) {
-        RUNTIME_ERROR("Access violation: Region %d is freed", id);
+    if (vm->heap.memory[offset] == NULL) {
+        RUNTIME_ERROR("Access violation: GC Object %d is freed", offset);
         return NULL;
     }
-    if (vm->arenas[id].generation != gen) {
-        RUNTIME_ERROR("Access violation: Stale pointer to recycled Region %d", id);
-        return NULL;
-    }
-    if (offset < 0 || offset >= vm->arenas[id].capacity) {
-        RUNTIME_ERROR("Heap overflow access");
-        return NULL;
-    }
-    return &vm->arenas[id].memory[offset];
+    return vm->heap.memory[offset];
 }
 
 int* vm_resolve_type(VM* vm, double ptr_val) {
-    int id = UNPACK_ARENA(ptr_val);
     int offset = UNPACK_OFFSET(ptr_val);
-    int gen = UNPACK_GEN(ptr_val);
-
-    if (id < 0 || id >= MAX_ARENAS || !vm->arenas[id].active) return NULL;
-    if (vm->arenas[id].generation != gen) return NULL;
-    return &vm->arenas[id].types[offset];
+    if (offset < 0 || offset >= vm->heap.capacity) return NULL;
+    if (vm->heap.memory[offset] == NULL) return NULL;
+    return vm->heap.types[offset];
 }
 
 double heap_alloc(VM* vm, int size) {
-    int id = vm->current_arena;
-    if (!vm->arenas[id].active) init_arena(vm, id);
-
-    if (vm->arenas[id].head + size >= vm->arenas[id].capacity) {
-        printf("Error: Heap Overflow in Region %d!\n", id);
-        mylo_exit(1);
-
+    if (vm->heap.count >= vm->heap.capacity * 0.75) { // Trigger GC at 75% capacity
+        gc_collect(vm);
+        if (vm->heap.count >= vm->heap.capacity * 0.75) {
+            // Still full after GC? Grow the heap!
+            int new_cap = vm->heap.capacity * 2;
+            vm->heap.memory = (double**)realloc(vm->heap.memory, new_cap * sizeof(double*));
+            vm->heap.types = (int**)realloc(vm->heap.types, new_cap * sizeof(int*));
+            vm->heap.sizes = (int*)realloc(vm->heap.sizes, new_cap * sizeof(int));
+            vm->heap.marked = (char*)realloc(vm->heap.marked, new_cap * sizeof(char));
+            
+            // Zero-out the new memory
+            for (int i = vm->heap.capacity; i < new_cap; i++) {
+                vm->heap.memory[i] = NULL;
+                vm->heap.types[i] = NULL;
+                vm->heap.sizes[i] = 0;
+                vm->heap.marked[i] = 0;
+            }
+            vm->heap.capacity = new_cap;
+        }
     }
-    int offset = vm->arenas[id].head;
-    vm->arenas[id].head += size;
-    return PACK_PTR(vm->arenas[id].generation, id, offset);
+    
+    // Find a free slot
+    int offset = -1;
+    for (int i = vm->heap.next_free; i < vm->heap.capacity; i++) {
+        if (vm->heap.memory[i] == NULL) {
+            offset = i;
+            break;
+        }
+    }
+    if (offset == -1) {
+        for (int i = 0; i < vm->heap.next_free; i++) {
+            if (vm->heap.memory[i] == NULL) {
+                offset = i;
+                break;
+            }
+        }
+    }
+    
+    if (offset == -1) {
+        printf("Error: GC Heap Overflow (Fragmentation)!\n");
+        mylo_exit(1);
+    }
+    
+    vm->heap.next_free = (offset + 1) % vm->heap.capacity;
+    vm->heap.memory[offset] = (double*)calloc(size, sizeof(double));
+    vm->heap.types[offset] = (int*)calloc(size, sizeof(int));
+    vm->heap.sizes[offset] = size;
+    vm->heap.count++;
+    
+    return PACK_PTR(offset);
 }
 
 void vm_push(VM* vm, double val, int type) {
@@ -591,15 +545,10 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem) {
         if (depth > 0) print_raw(vm, "\"");
     }
     else if (type == T_OBJ) {
-        int arena_id = UNPACK_ARENA(val);
-        int gen = UNPACK_GEN(val);
+        int offset = UNPACK_OFFSET(val);
 
-        if (arena_id < 0 || arena_id >= MAX_ARENAS || !vm->arenas[arena_id].active) {
-            print_raw(vm, "[Freed Object]");
-            return;
-        }
-        if (vm->arenas[arena_id].generation != gen) {
-            print_raw(vm, "[Stale Object Ref]");
+        if (offset < 0 || offset >= vm->heap.capacity || vm->heap.memory[offset] == NULL) {
+            print_raw(vm, "[Freed/Invalid Object]");
             return;
         }
 
@@ -1202,18 +1151,7 @@ static void exec_var_op(VM* vm, int op) {
         // Smart Local Protection
         if (type == T_OBJ) {
             int obj_offset = UNPACK_OFFSET(val);
-            for (int s = 0; s < vm->scope_sp; s++) {
-                // Check if the variable (target_idx) was declared BEFORE this scope started
-                // AND ensure the scope belongs to the CURRENT function frame (fp matches)
-                if (vm->scope_stack[s].fp == vm->fp &&
-                    target_idx <= vm->scope_stack[s].sp_at_entry &&
-                    vm->scope_stack[s].arena_id == vm->current_arena &&
-                    obj_offset >= vm->scope_stack[s].head) {
-                    
-                    // Push the scope boundary forward to protect the new allocation
-                    vm->scope_stack[s].head = vm->arenas[vm->current_arena].head;
-                }
-            }
+            // GC handles memory, no explicit protection needed
         }
     }
 }
@@ -1248,26 +1186,10 @@ static void exec_flow_op(VM* vm, int op) {
         double rv = vm->stack[vm->sp];
         int rt = vm->stack_types[vm->sp];
 
-        // [FIX] Loop to pop ALL scopes for the current function (fp)
         while (vm->scope_sp > 0) {
             VMScope* scope = &vm->scope_stack[vm->scope_sp - 1];
-
-            // Stop if we hit a scope from the Caller function
             if (scope->fp != vm->fp) break;
-
             vm->scope_sp--; // Pop the scope
-
-            // Handle Heap Rewind (Arena Memory)
-            if (vm->current_arena == scope->arena_id) {
-                if (rt == T_OBJ) {
-                    // Evacuate the return object to the parent scope/heap
-                    rv = vm_evacuate_object(vm, rv, scope->head);
-                }
-                // Reset the arena head to reclaim memory
-                if (rt != T_OBJ || UNPACK_OFFSET(rv) < scope->head) {
-                    vm->arenas[scope->arena_id].head = scope->head;
-                }
-            }
         }
 
         // Standard Return Logic
@@ -1427,16 +1349,6 @@ static void exec_array_op(VM* vm, int op) {
                     base[3] = new_data_ptr;
                     data = new_data; data_types = new_types;
 
-                    int map_offset = UNPACK_OFFSET(ptr);
-                    for (int s = 0; s < vm->scope_sp; s++) {
-                        // If the scope belongs to this arena AND the map is older than the scope
-                        if (vm->scope_stack[s].arena_id == vm->current_arena &&
-                            vm->scope_stack[s].head > map_offset) {
-
-                            // Shift the scope's rewind point to protect the new allocation
-                            vm->scope_stack[s].head = vm->arenas[vm->current_arena].head;
-                            }
-                    }
                 }
                 data[count*2] = key;
                 data_types[count*2] = kt; // Use the actual type instead of T_STR
@@ -1577,17 +1489,8 @@ static void exec_monitor(VM* vm) {
     //printf("\n================ [ VM MONITOR ] ================\n");
     printf(UI_BG_HEADER UI_BOLD UI_FG_WHITE "  Memory Monitor" EXTEND UI_RST "\n");
 
-   // printf("--- Regions (Arenas) ---\n");
-    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  Regions (Arenas)" EXTEND UI_RST "\n");
-    printf(UI_BG_CONTENT UI_FG_GRAY "  ID | Usage (Doubles)     | Status" EXTEND UI_RST "\n");
-    //printf(UI_BG_CONTENT UI_FG_GRAY "  " EXTEND UI_RST "\n");
-    //printf("  ---|---------------------|-------\n");
-    for (int i = 0; i < MAX_ARENAS; i++) {
-        if (vm->arenas[i].active) {
-            bool is_current = (i == vm->current_arena);
-            printf("  %2d | %6d / %-8d | %s%s\n", i, vm->arenas[i].head, vm->arenas[i].capacity, i == 0 ? "Main" : "Region", is_current ? " (Active Ctx)" : "");
-        }
-    }
+    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  GC Heap" EXTEND UI_RST "\n");
+    printf("  Objects: %d / %d\n", vm->heap.count, vm->heap.capacity);
 
     //printf("\n--- Globals ---\n");
     printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "\n   Globals" EXTEND UI_RST "\n");
@@ -1706,7 +1609,6 @@ int vm_step(VM* vm, bool debug_trace) {
     }
 
     int op = vm->bytecode[vm->ip++];
-
     switch (op) {
         // Stack & Constants
         case OP_PSH_NUM: { int idx = vm->bytecode[vm->ip++]; vm_push(vm, vm->constants[idx], T_NUM); break; }
@@ -1820,22 +1722,9 @@ int vm_step(VM* vm, bool debug_trace) {
             break;
         }
         case OP_SCOPE_ENTER: {
-            if (vm->scope_sp >= MAX_LOOP_NESTING) RUNTIME_ERROR("Stack Overflow (Scope)");
-            vm->scope_stack[vm->scope_sp].arena_id = vm->current_arena;
-            vm->scope_stack[vm->scope_sp].head = vm->arenas[vm->current_arena].head;
-            vm->scope_stack[vm->scope_sp].fp = vm->fp;
-            vm->scope_stack[vm->scope_sp].sp_at_entry = vm->sp;
-            vm->scope_sp++;
             break;
         }
         case OP_SCOPE_EXIT: {
-            if (vm->scope_sp > 0) {
-                vm->scope_sp--;
-                VMScope* scope = &vm->scope_stack[vm->scope_sp];
-                if (vm->current_arena == scope->arena_id) {
-                    vm->arenas[vm->current_arena].head = scope->head;
-                }
-            }
             break;
         }
         // Iterators
@@ -1870,26 +1759,18 @@ int vm_step(VM* vm, bool debug_trace) {
             break;
         }
 
-        // Arenas
+        // GC replaces Arenas
         case OP_NEW_ARENA: {
-            int id = -1;
-            for(int i=1; i<MAX_ARENAS; i++) { if(!vm->arenas[i].active) { id = i; break; } }
-            if(id == -1) RUNTIME_ERROR("Max Regions Reached");
-            init_arena(vm, id);
-            vm_push(vm, (double)id, T_NUM);
+            vm_push(vm, 0.0, T_NUM); // Return a dummy region ID
             break;
         }
         case OP_DEL_ARENA: {
-            int id = (int)vm_pop(vm);
-            if(id <= 0) RUNTIME_ERROR("Cannot clear main region or invalid region");
-            free_arena(vm, id);
+            vm_pop(vm); // Pop the region ID
+            gc_collect(vm);
             break;
         }
         case OP_SET_CTX: {
-            int id = (int)vm_pop(vm);
-            if (id < 0 || id >= MAX_ARENAS) RUNTIME_ERROR("Invalid Region ID");
-            if (!vm->arenas[id].active && id != 0) RUNTIME_ERROR("Region %d is not active", id);
-            vm->current_arena = id;
+            vm_pop(vm); // Pop Region ID
             break;
         }
         case OP_MONITOR: exec_monitor(vm); break;

@@ -37,7 +37,7 @@ It is fast to write, fast to run, and can run anywhere.
     * [Functions](#functions)
         - [Passing own types](#passing-own-types)
     * [Scope & Modules](#scope-modules)
-    * [Memory Management - Regions](#memory-management)
+    * [Memory Management - Garbage Collection](#memory-management)
     * [Import & Module Path](#import)
     * [C Interoperability Foreign Function Interface (FFI)](#c-interoperability-foreign-function-interface-ffi)
         + [Source example.mylo](#source-examplemylo)
@@ -129,27 +129,42 @@ var vertices: f32[] = [1.0, 0.5, -1.0]
 3.  **C-Bindings:** When passing a typed array to a C binding (via `C(...)`), Mylo passes the raw pointer (e.g. `int*`, `unsigned char*`), allowing for zero-copy overhead.
 
 <a name="structs"></a>
-### Structs
-You can make your own types using the `struct` keyword.
-The type is specified after var using the `:` operator
+### Structs (Classes & Object Orientation)
+You can make your own types using the `struct` keyword. Structs in Mylo support fields and methods, giving them object-oriented capabilities similar to classes.
+
+The type is specified after `var` using the `:` operator. Struct fields can be optionally separated by commas.
+
 ```javascript
 struct Color {
-    var r
-    var g
-    var b
+    var r,
+    var g,
+    var b,
+    
+    // You can define methods directly inside structs!
+    // The first parameter is usually `self` to access the struct instance.
+    fn to_grayscale(self) {
+        ret (self.r + self.g + self.b) / 3
+    }
 }
 
 // Very red
-var my_colour: Colour = { r=255, g=0, b=0 }
+var my_colour: Color = { r=255, g=0, b=0 }
+
+// Call a method
+print(my_colour.to_grayscale())
 ```
 
 #### Structs can also be annotated.
 
 ```javascript
-struct Vec3 { var x, y, z }
+struct Vec3 { 
+    var x: f32, 
+    var y: f32, 
+    var z: f32 
+}
 
-var pos: Vec3 = {x: 10, y: 20, z: 0}
-var mesh: Vec3[] = [{x:1}, {x:2}]
+var pos: Vec3 = {x: 10.0, y: 20.0, z: 0.0}
+var mesh: Vec3[] = [{x: 1.0}, {x: 2.0}]
 ```
 
 <a name="enums"></a>
@@ -606,82 +621,21 @@ print(a_big_number())
 <a name="memory-management"></a>
 ## Memory Management
 
-#### Region-Based Memory Management in Mylo
+#### Garbage Collection in Mylo
 
-Mylo uses a manual, deterministic memory management system based on **Regions** (also known as Arena Allocators). This allows for extremely high-performance memory allocation without the unpredictable pauses associated with Garbage Collection (GC).
+Mylo uses a tracing **Mark-and-Sweep Garbage Collector** to manage memory automatically. This means you do not need to manually allocate or free memory; the GC runs periodically when the heap reaches a threshold capacity and cleans up any objects (Lists, Maps, Strings, Structs) that are no longer reachable from the root variables.
 
-#### What is an Arena Allocator?
+In **Mylo**, variables allocated within functions and loops are automatically cleaned up when they go out of scope. If they are stored in longer-lived data structures, they persist until they are no longer accessible.
 
-In standard languages (like Java, Python, or Go), memory is managed object-by-object. When you create an object, the runtime finds a spot for it. When you stop using it, a Garbage Collector must scan memory to find it and delete it.
+#### What does this mean for developers?
 
-In **Mylo**, memory is managed in **Regions**.
+1.  **Automatic Memory Management:** You do not have to worry about manual memory arenas, tracking allocations, or freeing memory.
+2.  **No Region Syntax:** The deprecated `region` and `region_name::variable` syntax is no longer required or supported. Just declare variables using `var` and they will be managed automatically.
+3.  **Safety:** The GC guarantees that there will be no dangling pointers or "use-after-free" errors. Accessing memory is fundamentally safe.
 
-1.  **Allocation is Fast:** When you create an object in a region, Mylo simply moves a pointer forward. There is no searching for free slots. It is as fast as stack allocation.
-2.  **Deallocation is Instant:** You do not free individual objects. Instead, you `clear()` the entire region at once. This resets the pointer to the beginning.
-3.  **Cache Friendly:** Objects allocated together stay together in RAM, improving CPU cache performance.
+#### Example: Temporary Variables (The "Loop" Pattern)
 
----
-
-### Syntax
-
-#### 1. Defining a Region
-Use the `region` keyword to declare a new memory arena.
-
-```javascript
-region my_arena
-```
-
-#### 2. Allocating into a Region
-Use the double-colon syntax `::` to allocate a variable's *data* into a specific region.
-
-```javascript
-// 'numbers' lives in 'my_arena'
-var my_arena::numbers = [1, 2, 3, 4, 5]
-
-// 'name' lives in 'my_arena'
-var my_arena::name = "Mylo"
-```
-
-> **Note:** Primitive types (Numbers, Booleans) are stored directly in the variable slot (stack or global). Only Heap objects (Arrays, Strings, Maps, Structs) consume space in the Region.
-
-#### 3. Clearing a Region
-Use the `clear()` function to wipe all memory associated with that region.
-
-```javascript
-clear(my_arena)
-```
-
-Any variables that pointed to data in this region are now **Stale**. Accessing them will result in a runtime safety error, preventing memory corruption.
-
----
-
-### Examples
-
-#### Example 1: Basic Lifecycle
-
-```javascript
-// 1. Create the region
-region level_data
-
-// 2. Allocate heavy data into it
-var level_data::map_grid = list(1000)
-var level_data::enemy_list = ["Orc", "Goblin", "Dragon"]
-
-print(enemy_list) 
-// Output: ["Orc", "Goblin", "Dragon"]
-
-// 3. Destroy all data instantly
-clear(level_data)
-
-// 4. Safety Check
-// Accessing the old variable is safe (it crashes cleanly rather than reading garbage)
-// print(enemy_list) 
-// Error: [Stale Object Ref]
-```
-
-#### Example 2: Temporary Workspace (The "Loop" Pattern)
-
-This is the most common use case. In a game loop or server request handler, you generate temporary data that is only needed for that specific iteration.
+In a game loop or server request handler, you generate temporary data that is only needed for that specific iteration.
 
 ```javascript
 var i = 0
@@ -692,61 +646,16 @@ forever {
 
     print("--- Frame " + to_string(i) + " ---")
 
-    // Create a scoped region for this frame
-    region frame_mem
-
     // Create temporary strings and arrays
-    // Without regions, this would create garbage for the GC to clean up later
-    var frame_mem::temp_calc = [i, i * 2, i * 3]
-    var frame_mem::log_msg = "Processing entity " + to_string(i)
+    // These will be automatically collected by the GC when they go out of scope
+    var temp_calc = [i, i * 2, i * 3]
+    var log_msg = "Processing entity " + to_string(i)
 
     print(temp_calc)
     print(log_msg)
-
-    // INSTANTLY free all memory used in this frame
-    clear(frame_mem)
     
     i = i + 1
 }
-```
-
-**Output:**
-```text
---- Frame 0 ---
-[0, 0, 0]
-Processing entity 0
---- Frame 1 ---
-[1, 2, 3]
-Processing entity 1
---- Frame 2 ---
-[2, 4, 6]
-Processing entity 2
-```
-
----
-
-### Safety: The Generational System
-
-Mylo solves the "ABA Problem" (accessing memory that has been freed and then re-allocated for something else) using **Generational Pointers**.
-
-1.  Every Region has a **Generation ID** (Version Number).
-2.  Every Pointer stores the **Generation ID** it was created with.
-3.  When you `clear(region)`, the Region's Generation ID increments.
-4.  If you try to access an old variable, Mylo sees that the Pointer's Generation does not match the Region's current Generation and blocks access.
-
-```javascript
-region foo
-var foo::x = [1, 2, 3]
-
-clear(foo) // Region version increments
-
-// Reusing the region for new data
-var foo::y = ["New", "Data"] 
-
-// 'x' still points to the old version of 'foo' (Gen 1)
-// 'foo' is now (Gen 2)
-print(foo::x) 
-// Output: [Stale Object Ref]
 ```
 
 <a name="import"></a>

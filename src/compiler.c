@@ -150,6 +150,8 @@ struct StructDef {
     char fields[MAX_FIELDS][MAX_IDENTIFIER];
     int field_types[MAX_FIELDS]; // Added to store type IDs
     int field_count;
+    char methods[MAX_FIELDS][MAX_IDENTIFIER];
+    int method_count;
 } struct_defs[MAX_STRUCTS];
 
 int struct_count = 0;
@@ -163,6 +165,7 @@ void parse_map_literal();
 void expression();
 void statement();
 void range_expr();
+void parse_function_body(char* registered_name, char* mangled_name, int implicit_self_type);
 
 void print_line_slice(char *start, char *end) {
     while (start < end) { fputc(*start, stderr); start++; }
@@ -293,6 +296,12 @@ int find_struct(char *name) {
 int find_field(int struct_idx, char *field) {
     for (int i = 0; i < struct_defs[struct_idx].field_count; i++)
         if (strcmp(struct_defs[struct_idx].fields[i], field) == 0) return i;
+    return -1;
+}
+
+int find_method(int struct_idx, char *method) {
+    for (int i = 0; i < struct_defs[struct_idx].method_count; i++)
+        if (strcmp(struct_defs[struct_idx].methods[i], method) == 0) return i;
     return -1;
 }
 
@@ -1127,8 +1136,27 @@ void factor() {
                     if (type_id < 0) error("Accessing member '%s' of untyped/primitive var.", f);
 
                     int offset = find_field(type_id, f);
-                    if (offset == -1) error("Struct '%s' has no field '%s'", struct_defs[type_id].name, f);
-                    //emit(OP_HGET); emit(offset); emit(type_id); type_id = -1;
+                    if (offset == -1) {
+                        int method_idx = find_method(type_id, f);
+                        if (method_idx != -1) {
+                            if (curr.type != TK_LPAREN) error("Method '%s' must be called", f);
+                            match(TK_LPAREN);
+                            int arg_count = 1; // 'self' is implicitly pushed by the previous emit(OP_LVAR) or emit(OP_GET)
+                            if (curr.type != TK_RPAREN) {
+                                expression(); arg_count++;
+                                while (curr.type == TK_COMMA) { match(TK_COMMA); expression(); arg_count++; }
+                            }
+                            match(TK_RPAREN);
+                            char full_name[MAX_IDENTIFIER * 2];
+                            sprintf(full_name, "%s_%s", struct_defs[type_id].name, f);
+                            int faddr = find_func(full_name);
+                            if (faddr == -1) error("Undefined method '%s'", full_name);
+                            emit(OP_CALL); emit(faddr); emit(arg_count);
+                            type_id = -1; // Methods don't have statically typed return values right now
+                            continue;
+                        }
+                        error("Struct '%s' has no field or method '%s'", struct_defs[type_id].name, f);
+                    }
                     int field_type = struct_defs[type_id].field_types[offset];
                     emit(OP_HGET); emit(offset); emit(type_id);
                     type_id = field_type; // Propagate the type of the field to the next iteration
@@ -2129,23 +2157,48 @@ void struct_decl() {
     int idx = struct_count++;
     strcpy(struct_defs[idx].name, m);
     struct_defs[idx].field_count = 0;
-    while (curr.type == TK_VAR) {
-        match(TK_VAR);
-        strcpy(struct_defs[idx].fields[struct_defs[idx].field_count], curr.text);
+    while (curr.type == TK_VAR || curr.type == TK_FN) {
+        if (curr.type == TK_VAR) {
+            match(TK_VAR);
+            strcpy(struct_defs[idx].fields[struct_defs[idx].field_count], curr.text);
 
-        // Default to NUM (double) if no type is provided, standard for Mylo structs
-        struct_defs[idx].field_types[struct_defs[idx].field_count] = TYPE_NUM;
+            // Default to NUM (double) if no type is provided, standard for Mylo structs
+            struct_defs[idx].field_types[struct_defs[idx].field_count] = TYPE_NUM;
 
-        match(TK_ID);
+            match(TK_ID);
 
-        // Check for Type Annotation : i16
-        if (curr.type == TK_COLON) {
-            match(TK_COLON);
-            TypeInfo ti = parse_type_spec();
-            struct_defs[idx].field_types[struct_defs[idx].field_count] = ti.id;
+            // Check for Type Annotation : i16
+            if (curr.type == TK_COLON) {
+                match(TK_COLON);
+                TypeInfo ti = parse_type_spec();
+                struct_defs[idx].field_types[struct_defs[idx].field_count] = ti.id;
+            }
+
+            struct_defs[idx].field_count++;
+        } else if (curr.type == TK_FN) {
+            match(TK_FN);
+            char method_name[MAX_IDENTIFIER];
+            strcpy(method_name, curr.text);
+            match(TK_ID);
+            
+            // Add method to struct
+            strcpy(struct_defs[idx].methods[struct_defs[idx].method_count], method_name);
+            struct_defs[idx].method_count++;
+            
+            // The method's global mangled name is structName_methodName
+            char full_name[MAX_IDENTIFIER * 2];
+            sprintf(full_name, "%s_%s", m, method_name); // `m` is the mangled struct name
+            
+            int saved_scope = current_scope_depth;
+            current_scope_depth = 0;
+            
+            parse_function_body(full_name, full_name, idx);
+            
+            current_scope_depth = saved_scope;
         }
-
-        struct_defs[idx].field_count++;
+        
+        // Optional trailing comma
+        if (curr.type == TK_COMMA) match(TK_COMMA);
     }
     match(TK_RBRACE);
 }
@@ -2401,22 +2454,14 @@ void statement() {
     } else if (curr.type != TK_EOF) next_token();
 }
 
-void function() {
-    match(TK_FN);
-    int saved_scope_depth = current_scope_depth; // <-- Save outer scope
-    current_scope_depth = 0;                     // <-- Reset for new function
-    if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) error("'C' is reserved");
-    char name[MAX_IDENTIFIER];
-    strcpy(name, curr.text);
-    match(TK_ID);
+void parse_function_body(char* registered_name, char* mangled_name, int implicit_self_type) {
     emit(OP_JMP);
     int p = compiling_vm->code_size;
     emit(0);
-    char m[MAX_IDENTIFIER * 2];
-    get_mangled_name(m, name);
-    strcpy(funcs[func_count].name, m);
+    strcpy(funcs[func_count].name, mangled_name);
     funcs[func_count++].addr = compiling_vm->code_size;
-    vm_register_function(compiling_vm, name, compiling_vm->code_size);
+    vm_register_function(compiling_vm, registered_name, compiling_vm->code_size);
+
     int start_debug_idx = debug_symbol_count;
     bool ps = inside_function;
     int pl = local_count;
@@ -2435,6 +2480,8 @@ void function() {
         if (curr.type == TK_COLON) {
             match(TK_COLON);
             ti = parse_type_spec();
+        } else if (implicit_self_type != -1 && strcmp(arg_name, "self") == 0) {
+            ti.id = implicit_self_type;
         }
         int loc = alloc_var(true, arg_name, ti.id, ti.is_array);
 
@@ -2474,7 +2521,23 @@ void function() {
     }
     inside_function = ps;
     local_count = pl;
-    current_scope_depth = saved_scope_depth;     // <-- Restore outer scope
+}
+
+void function() {
+    match(TK_FN);
+    int saved_scope_depth = current_scope_depth; // <-- Save outer scope
+    current_scope_depth = 0;                     // <-- Reset for new function
+    if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) error("'C' is reserved");
+    char name[MAX_IDENTIFIER];
+    strcpy(name, curr.text);
+    match(TK_ID);
+    
+    char m[MAX_IDENTIFIER * 2];
+    get_mangled_name(m, name);
+    
+    parse_function_body(name, m, -1);
+    
+    current_scope_depth = saved_scope_depth; // <-- Restore outer scope
 }
 
 

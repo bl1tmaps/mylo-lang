@@ -54,7 +54,6 @@ typedef struct {
 #endif
   VM vm;             // The Worker's Isolated VM
   int region_id;     // The Region ID this worker owns
-  MemoryArena arena; // The actual memory of that region
   char entry_func[64];
 } MyloWorker;
 
@@ -85,89 +84,27 @@ static pthread_mutex_t bus_lock = PTHREAD_MUTEX_INITIALIZER;
 #define INIT_BUS_LOCK // Static init is enough for pthreads
 #endif
 
-void std_create_region(VM *vm) {
-
-  int id = -1;
-  // Find the first available region slot
-  for (int i = 1; i < MAX_ARENAS; i++) {
-    if (!vm->arenas[i].active) {
-      id = i;
-      break;
-    }
-  }
-  if (id == -1) {
-    printf("Runtime Error: Max Regions Reached\n");
-    exit(1);
-  }
-
-  init_arena(vm, id);
-  vm_push(vm, (double)id, T_NUM); // Return the region ID to Mylo
+static const char *get_str(VM *vm, double val) {
+  int id = (int)val;
+  if (id < 0 || id >= vm->str_count)
+    return "";
+  return vm->string_pool[id];
 }
 
-void std_set_region(VM *vm) {
-  if (vm->sp < 0) {
-    printf("Stack underflow\n");
-    exit(1);
-  }
-  int id = (int)vm_pop(vm);
-
-  if (id < 0 || id >= MAX_ARENAS) {
-    printf("Invalid Region ID\n");
-    exit(1);
-  }
-  if (!vm->arenas[id].active && id != 0) {
-    printf("Region %d is not active\n", id);
-    exit(1);
-  }
-
-  vm->current_arena = id;
-  vm_push(vm, 0, T_NUM);
+void trim_newline(char *str) {
+  int len = strlen(str);
+  if (len > 0 && str[len - 1] == '\n')
+    str[len - 1] = '\0';
+  if (len > 1 && str[len - 2] == '\r')
+    str[len - 2] = '\0';
 }
 
-void std_get_region(VM *vm) {
-  // Allows a thread to query which arena it is currently executing inside
-  vm_push(vm, (double)vm->current_arena, T_NUM);
-}
-
-void std_clear_region(VM *vm) {
-  if (vm->sp < 0) {
-    printf("Stack underflow\n");
-    exit(1);
-  }
-  int id = (int)vm_pop(vm);
-
-  if (id <= 0) {
-    printf("Cannot clear main region or invalid region\n");
-    exit(1);
-  }
-  free_arena(vm, id);
-  vm_push(vm, 0, T_NUM);
-}
-// Implementation of std_copy (Deep Copy)
+// Region functions were removed due to GC implementation.
 void std_copy(VM *vm) {
-  if (vm->sp < 0) {
-    // mylo_runtime_error(vm, "Stack Underflow"); return;
-    printf("Runtime Error: Stack Overflow at copy");
-    exit(1);
-  }
-
   double val = vm->stack[vm->sp];
   int type = vm->stack_types[vm->sp];
   vm->sp--; // Pop argument
-
-  if (type == T_OBJ) {
-    // Force a deep copy by pretending the object is in a "danger zone"
-    // (target_head = 0) This copies it to the end of the current arena.
-    double new_val = vm_evacuate_object(vm, val, 99999999);
-    // WAIT: vm_evacuate_object takes "target_head" as the SAFETY boundary.
-    // If (offset < target_head) -> Safe.
-    // We want (offset < target_head) to be FALSE.
-    double res = vm_evacuate_object(vm, val, 0);
-    vm_push(vm, res, T_OBJ);
-  } else {
-    // Primitives copy by value
-    vm_push(vm, val, type);
-  }
+  vm_push(vm, val, type);
 }
 // Helper to init the lock lazily
 static void init_bus() {
@@ -188,23 +125,7 @@ static void init_workers() {
   }
 }
 
-static const char *get_str(VM *vm, double val) {
-  int id = (int)val;
-  if (id < 0 || id >= vm->str_count)
-    return "";
-  return vm->string_pool[id];
-}
-
-void trim_newline(char *str) {
-  int len = strlen(str);
-  if (len > 0 && str[len - 1] == '\n')
-    str[len - 1] = '\0';
-  if (len > 1 && str[len - 2] == '\r')
-    str[len - 2] = '\0';
-}
-
 // --- Thread Worker Function ---
-
 #ifdef _WIN32
 unsigned __stdcall mylo_worker_entry(void *arg) {
 #else
@@ -213,50 +134,22 @@ void *mylo_worker_entry(void *arg) {
   MyloWorker *worker = (MyloWorker *)arg;
   VM *vm = &worker->vm;
 
-  // 1. Inject the Region
-  // We place the arena into the SAME slot ID it had in the parent.
-  // This ensures pointers (which encode the Arena ID) remain valid.
-  vm->arenas[worker->region_id] = worker->arena;
-  vm->current_arena = worker->region_id;
-
-  // 2. Locate Entry Point
+  // 1. Locate Entry Point
   int func_addr = vm_find_function(vm, worker->entry_func);
   if (func_addr == -1) {
     worker->error = true;
-    snprintf(worker->error_msg, 256, "Function '%s' not found in worker.",
-             worker->entry_func);
+    // For now we just silently error or we could set error_msg if it existed
   } else {
-    // [FIX] 3. Setup Dummy Stack Frame
-    // The worker function is compiled as a standard function, so it ends with
-    // OP_RET. OP_RET expects [Return IP, Old FP] on the stack.
+    // 2. Setup Dummy Stack Frame for OP_RET
+    vm_push(vm, (double)vm->code_size, T_NUM); // Return IP
+    vm_push(vm, 0.0, T_NUM);                   // Old FP
+    vm->fp = vm->sp + 1;                       // Set FP for OP_RET
 
-    // Push "Exit" Address.
-    // When the function returns, it will try to jump to this address.
-    // We use code_size so the run_vm loop sees (ip < code_size) as false and
-    // terminates naturally.
-    vm_push(vm, (double)vm->code_size, T_NUM);
-
-    // Push "Old FP". 0 is fine.
-    vm_push(vm, 0.0, T_NUM);
-
-    // Set Frame Pointer to just after these two (where locals would start)
-    vm->fp = vm->sp + 1;
-
-    // 4. Run
+    // 3. Execute
     run_vm_from(vm, func_addr, false);
   }
 
-  // 5. Extract Region State (Move Semantics: Take it back)
-  // The VM state might have updated the head/generation of the arena.
-  worker->arena = vm->arenas[worker->region_id];
-
-  // 6. Protect Memory from Cleanup
-  // We nullify the pointer in the VM so vm_cleanup doesn't free the memory
-  // we want to return to the main thread.
-  vm->arenas[worker->region_id].memory = NULL;
-  vm->arenas[worker->region_id].types = NULL;
-
-  // 7. Cleanup Worker VM (Frees code, stack, constants, etc.)
+  // 3. Cleanup
   vm_cleanup(vm);
 
   worker->complete = true;
@@ -268,29 +161,14 @@ void *mylo_worker_entry(void *arg) {
 #endif
 }
 
-// --- Standard Library Functions ---
-
-// std_create_worker(region, "function_name") -> worker_id
+// std_create_worker("function_name") -> worker_id
 void std_create_worker(VM *vm) {
   init_workers();
 
   double func_id = vm_pop(vm);
-  double region_val = vm_pop(vm); // This is the region ID (num)
-
-  int region_id = (int)region_val;
   const char *func_name = get_str(vm, func_id);
 
-  // 1. Validation
-  if (region_id <= 0 || region_id >= MAX_ARENAS) {
-    printf("Runtime Error: Invalid Region ID %d for worker.\n", region_id);
-    exit(1);
-  }
-  if (!vm->arenas[region_id].active) {
-    printf("Runtime Error: Region %d is not active.\n", region_id);
-    exit(1);
-  }
-
-  // 2. Find Slot
+  // 1. Find Slot
   int slot = -1;
   for (int i = 0; i < MAX_WORKERS; i++) {
     if (!workers[i].active) {
@@ -308,21 +186,10 @@ void std_create_worker(VM *vm) {
   w->active = true;
   w->complete = false;
   w->error = false;
-  w->region_id = region_id;
+  w->region_id = 0; // Unused now
   strncpy(w->entry_func, func_name, 63);
 
-  // 3. Move Semantics: Steal Arena from Main VM
-  w->arena = vm->arenas[region_id];
-
-  // Disable in Main VM (It is now owned by the worker)
-  // vm->arenas[region_id].active = false;
-  vm->arenas[region_id].memory =
-      NULL; // Prevent main VM from freeing it if it crashes
-  vm->arenas[region_id].types = NULL;
-
-  // 4. Initialize Worker VM
-  // We must clone the "Read-Only" parts of the VM (Code, Constants, Strings)
-  // so the worker has the same program definition.
+  // 2. Initialize Worker VM
   VM *child = &w->vm;
   vm_init(child);
 
@@ -345,25 +212,26 @@ void std_create_worker(VM *vm) {
   memcpy(child->functions, vm->functions,
          vm->function_count * sizeof(VMFunction));
 
-  // Copy Globals (Optional, but often needed for constants/config)
-  // NOTE: Globals are copied by value. Workers do NOT share global state
-  // updates.
+  // Copy Globals (Primitive values only, object pointers are wiped)
   child->global_symbol_count = vm->global_symbol_count;
-  // We don't have direct access to symbol names here easily without re-parsing,
-  // but the VM struct has global_symbols if debug info was generated.
-  // For runtime execution, we just need the values.
-  memcpy(child->globals, vm->globals, MAX_GLOBALS * sizeof(double));
-  memcpy(child->global_types, vm->global_types, MAX_GLOBALS * sizeof(int));
+  for (int i=0; i<MAX_GLOBALS; i++) {
+      if (vm->global_types[i] == T_OBJ) {
+          child->globals[i] = 0.0;
+          child->global_types[i] = T_NUM;
+      } else {
+          child->globals[i] = vm->globals[i];
+          child->global_types[i] = vm->global_types[i];
+      }
+  }
 
   // Register Native Functions (Standard Library)
-  // We iterate the std_library array to re-bind pointers
   int li = 0;
   while (std_library[li].name != NULL) {
     child->natives[li] = std_library[li].func;
     li++;
   }
 
-  // 5. Spawn Thread
+  // 3. Spawn Thread
 #ifdef _WIN32
   w->thread =
       (HANDLE)_beginthreadex(NULL, 0, &mylo_worker_entry, w, 0, &w->threadID);
@@ -375,7 +243,7 @@ void std_create_worker(VM *vm) {
 }
 
 // std_dock_worker(worker_id) -> void
-// Blocks until worker is done, then returns the region to the main VM.
+// Blocks until worker is done.
 void std_dock_worker(VM *vm) {
   double id_val = vm_pop(vm);
   int slot = (int)id_val;
@@ -399,14 +267,6 @@ void std_dock_worker(VM *vm) {
     printf("Worker Error: %s\n", w->error_msg);
   }
 
-  // 2. Restore Arena to Main VM
-  // We put it back in the exact same slot.
-  int rid = w->region_id;
-  vm->arenas[rid] = w->arena;
-  // Ensure it is marked active in Main
-  vm->arenas[rid].active = true;
-
-  // 3. Free Worker Slot
   w->active = false;
 
   vm_push(vm, 0.0, T_NUM);
@@ -2620,7 +2480,7 @@ const StdLibDef std_library[] = {
     {"system", std_system, "arr", 1, {"str"}},
     {"system_thread", std_system_thread, "num", 2, {"str", "str"}},
     {"get_job", std_get_job, "any", 1, {"str"}},
-    {"create_worker", std_create_worker, "num", 2, {"num", "str"}},
+    {"create_worker", std_create_worker, "num", 1, {"str"}},
     {"dock_worker", std_dock_worker, "void", 1, {"num"}},
     {"check_worker", std_check_worker, "num", 1, {"num"}},
     {"bus_set", std_bus_set, "num", 2, {"str", "any"}},
@@ -2645,10 +2505,6 @@ const StdLibDef std_library[] = {
      "any",
      7,
      {"num", "num", "num", "num", "num", "num", "str"}},
-    {"create_region", std_create_region, "num", 0, {NULL}},
-    {"set_region", std_set_region, "void", 1, {"num"}},
-    {"get_region", std_get_region, "num", 0, {NULL}},
-    {"clear_region", std_clear_region, "void", 1, {"num"}},
     {"call", std_call, "any", 2, {"str", "any"}},
     {"filter", std_filter, "arr", 2, {"arr", "str"}},
     {"param_filter", std_param_filter, "arr", 3, {"arr", "str", "any"}},

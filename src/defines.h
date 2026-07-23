@@ -67,33 +67,12 @@
 // FFI
 #define MAX_STD_ARGS 12
 
-// --- POINTER PACKING (Safe Generational) ---
-// We restrict the total used bits to 48 to ensure absolute safety
-// within the 53-bit mantissa of a double, avoiding any implicit bit edge cases.
-// Offset: 28 bits (256MB per region - plenty for tests)
-// Arena:   6 bits (64 regions)
-// Gen:    14 bits (16k versions)
-// Total:  48 bits.
+// --- POINTER PACKING (Safe GC) ---
+// Since we use a GC heap now, the pointer is just an index offset.
+// Max index is 2^53 (double mantissa) which is plenty.
 
-#define PTR_OFFSET_BITS 28
-#define PTR_ARENA_BITS 6
-#define PTR_GEN_BITS 14
-
-#define PACK_PTR(gen, arena, offset) \
-    ((double)( \
-        ((unsigned long long)(offset)) | \
-        ((unsigned long long)(arena) << PTR_OFFSET_BITS) | \
-        ((unsigned long long)(gen) << (PTR_OFFSET_BITS + PTR_ARENA_BITS)) \
-    ))
-
-#define UNPACK_OFFSET(ptr) \
-    ((int)((unsigned long long)(ptr) & 0xFFFFFFF))
-
-#define UNPACK_ARENA(ptr) \
-    ((int)(((unsigned long long)(ptr) >> PTR_OFFSET_BITS) & 0x3F))
-
-#define UNPACK_GEN(ptr) \
-    ((int)(((unsigned long long)(ptr) >> (PTR_OFFSET_BITS + PTR_ARENA_BITS)) & 0x3FFF))
+#define PACK_PTR(offset) ((double)((unsigned long long)(offset)))
+#define UNPACK_OFFSET(ptr) ((int)((unsigned long long)(ptr)))
 
 
 // For bundles

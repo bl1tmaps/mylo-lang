@@ -66,10 +66,7 @@ void std_kbhit(VM *vm);
 void std_get_keys(VM *vm);
 
 // Memory Alloc
-void std_create_region(VM *vm);
-void std_set_region(VM *vm);
-void std_get_region(VM *vm);
-void std_clear_region(VM *vm);
+// Region functions removed due to GC implementation.
 
 // Call via name
 void std_call(VM *vm);
