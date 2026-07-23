@@ -123,7 +123,7 @@ void handle_completion(int id, const char* body) {
                 const char* keywords[] = {
                     "fn", "cfn", "var", "if", "for", "ret", "print", "in", "struct", "else",
                     "mod", "import", "forever", "break", "continue", "enum", "true", "false",
-                    "embed", "region", "clear", "monitor", "debugger", "elif",
+                    "embed", "self", "monitor", "debugger", "elif",
                     // Types
                     "any", "num", "str", "f64", "f32", "i32", "i16", "i64", "byte", "bool",
                     NULL

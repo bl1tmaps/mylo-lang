@@ -1,17 +1,61 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
+
+let client;
 
 function activate(context) {
+    // Determine the path to the bundled binaries
+    const binDir = path.join(context.extensionPath, 'bin');
+    const myloExt = process.platform === 'win32' ? '.exe' : '';
+    
+    // CMake on Windows typically creates Debug/Release subdirectories
+    let myloPath = path.join(binDir, `mylo${myloExt}`);
+    let myloLspPath = path.join(binDir, `mylo-lsp${myloExt}`);
+    
+    if (!fs.existsSync(myloPath) && fs.existsSync(path.join(binDir, 'Debug', `mylo${myloExt}`))) {
+        myloPath = path.join(binDir, 'Debug', `mylo${myloExt}`);
+        myloLspPath = path.join(binDir, 'Debug', `mylo-lsp${myloExt}`);
+    } else if (!fs.existsSync(myloPath) && fs.existsSync(path.join(binDir, 'Release', `mylo${myloExt}`))) {
+        myloPath = path.join(binDir, 'Release', `mylo${myloExt}`);
+        myloLspPath = path.join(binDir, 'Release', `mylo-lsp${myloExt}`);
+    }
+
+    // --- Language Server Setup ---
+    if (fs.existsSync(myloLspPath)) {
+        const serverOptions = {
+            run: { command: myloLspPath, transport: TransportKind.stdio },
+            debug: { command: myloLspPath, transport: TransportKind.stdio }
+        };
+
+        const clientOptions = {
+            documentSelector: [{ scheme: 'file', language: 'mylo' }],
+            synchronize: {
+                fileEvents: vscode.workspace.createFileSystemWatcher('**/*.mylo')
+            }
+        };
+
+        client = new LanguageClient(
+            'myloLanguageServer',
+            'Mylo Language Server',
+            serverOptions,
+            clientOptions
+        );
+
+        client.start();
+    } else {
+        vscode.window.showWarningMessage('Mylo Language Server executable not found in bin/. LSP will be disabled.');
+    }
+
+    // --- Debug Adapter Setup ---
     context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('mylo', {
         createDebugAdapterDescriptor: (session, executable) => {
-            // ---------------------------------------------------------
-            // CONFIGURATION: Point this to your compiled mylo executable
-            // ---------------------------------------------------------
-            // Tip: Use an absolute path for development
-            const myloPath = '/path/to/cmake-build-debug/mylo';
+            if (!fs.existsSync(myloPath)) {
+                vscode.window.showErrorMessage(`Mylo executable not found at: ${myloPath}`);
+                return undefined;
+            }
 
-            // We expect the launch.json to provide the "program"
             const program = session.configuration.program;
 
             if (!program) {
@@ -19,13 +63,10 @@ function activate(context) {
                 return undefined;
             }
 
-            // 1. Get CWD from config, or default to first workspace folder
             const cwd = session.configuration.cwd || (vscode.workspace.workspaceFolders ? vscode.workspace.workspaceFolders[0].uri.fsPath : undefined);
-
             const envConfig = session.configuration.env || {};
             const spawnedEnv = { ...process.env, ...envConfig };
 
-            // 2. Pass 'cwd' in the options object (3rd argument)
             return new vscode.DebugAdapterExecutable(
                 myloPath,
                 ['--dap', program],
@@ -38,6 +79,11 @@ function activate(context) {
     }));
 }
 
-function deactivate() {}
+function deactivate() {
+    if (!client) {
+        return undefined;
+    }
+    return client.stop();
+}
 
 module.exports = { activate, deactivate };

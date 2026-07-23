@@ -1,0 +1,5 @@
+.vscodeignore
+build/
+CMakeLists.txt
+package-lock.json
+*.log
