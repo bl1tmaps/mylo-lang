@@ -90,7 +90,7 @@ EXAMPLES:
 
 ## Building Mylo
 
-### The simple way
+### The simple way, with no modules
 ```bash
  # Call the c compiler with source, and link math.
 > cc src/*.c -o mylo -lm
@@ -109,6 +109,11 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -DMODULES=ON
 cd build
 make -j8
 ```
+
+### The 'modules' directory
+Modules, that contain .mylo wrappers and binary shared libraries are 
+stored next to the mylo executable. Mylo will search here for these files at 
+runtime, or during bundling.
 
 
 ## Debugging in VSCode
