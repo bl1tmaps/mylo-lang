@@ -1924,6 +1924,18 @@ bool load_self_contained(VM* vm, const char* exe_path) {
         for (int i = 0; i < dep_count; i++) {
             printf("Loading ... %s\n", deps[i].name);
             void* lib = load_library(deps[i].name);
+
+            if (!lib) {
+                extern char mylo_exe_dir[1024];
+                char exe_path[1024];
+                const char* clean_name = deps[i].name;
+
+                // Strip the "./" prefix injected by get_lib_name on Unix systems
+                if (strncmp(clean_name, "./", 2) == 0) clean_name += 2;
+
+                snprintf(exe_path, sizeof(exe_path), "%s/%s", mylo_exe_dir, clean_name);
+                lib = load_library(exe_path);
+            }
             
             if (!lib) {
                 char *pathvar;

@@ -1511,7 +1511,14 @@ static void parse_import() {
 
             if (compiling_vm->dependency_count < MAX_DEPENDENCIES) {
                 Dependency* dep = &compiling_vm->dependencies[compiling_vm->dependency_count++];
-                strcpy(dep->name, lib_name);
+
+                // FIX: Strip directories so we only embed the base filename into the bundle
+                char clean_lib_name[MAX_STRING_LENGTH];
+                char* slash = strrchr(filename, '/');
+                char* backslash = strrchr(filename, '\\');
+                char* base_filename = (slash > backslash) ? slash + 1 : (backslash ? backslash + 1 : filename);
+                get_lib_name(clean_lib_name, base_filename);
+                strcpy(dep->name, clean_lib_name);
                 dep->start_index = std_count + start_ffi_index;
             }
         }
