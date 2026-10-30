@@ -1558,6 +1558,24 @@ inline TestOutput test_num_type_removed_error() {
     return run_error_test("x: num = 5\n");
 }
 
+inline TestOutput test_bracketed_range_array() {
+    std::string src =
+    "a: i32[] = [0...5]\n"
+    "print(a)\n"
+    "b: array = [0...3]\n"
+    "print(b)\n"
+    "print([1...4])\n"
+    "c: i32[] = [10, 20]\n"
+    "c = [0...2]\n"
+    "print(c)\n";
+    std::string expected =
+    "[0, 1, 2, 3, 4, 5]\n"
+    "[0, 1, 2, 3]\n"
+    "[1, 2, 3, 4]\n"
+    "[0, 1, 2]\n";
+    return run_source_test(src, expected);
+}
+
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
     ADD_TEST("Test Print", test_hello_world);
@@ -1656,6 +1674,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Arena Execution", test_arena_execution);
     ADD_TEST("Test All Strict Types", test_all_strict_types);
     ADD_TEST("Test Num Type Removed Error", test_num_type_removed_error);
+    ADD_TEST("Test Bracketed Range Array", test_bracketed_range_array);
 
 
 }

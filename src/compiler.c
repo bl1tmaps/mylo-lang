@@ -133,6 +133,7 @@ typedef struct {
 LoopControl loop_stack[MAX_LOOP_NESTING];
 int loop_depth = 0;
 int current_scope_depth = 0; // <-- NEW: Compiler-wide scope tracker
+static bool last_expr_was_range = false;
 
 Symbol globals[MAX_GLOBALS];
 int global_count = 0;
@@ -770,6 +771,7 @@ void compiler_reset() {
     c_header_count = 0;
     line = 1;
     inside_function = false;
+    last_expr_was_range = false;
 }
 
 static bool is_enum_type(const char *name) {
@@ -997,12 +999,19 @@ void factor() {
     } else if (curr.type == TK_LBRACKET) {
         match(TK_LBRACKET);
         int count = 0;
+        bool is_single_range = false;
         if (curr.type != TK_RBRACKET) {
             expression(); count++;
+            if (count == 1 && curr.type == TK_RBRACKET && last_expr_was_range) {
+                is_single_range = true;
+            }
             while (curr.type == TK_COMMA) { match(TK_COMMA); expression(); count++; }
         }
         match(TK_RBRACKET);
-        emit(OP_ARR); emit(count);
+        if (!is_single_range) {
+            emit(OP_ARR); emit(count);
+        }
+        last_expr_was_range = false;
     } else if (curr.type == TK_LBRACE) {
         char *safe_src = src; Token safe_curr = curr; int safe_line = line;
         match(TK_LBRACE);
@@ -1307,6 +1316,7 @@ void additive_expr() {
 void relation_expr() {
     range_expr();
     while (curr.type >= TK_LT && curr.type <= TK_NEQ) {
+        last_expr_was_range = false;
         MyloTokenType op = curr.type;
         next_token();
         range_expr();
@@ -1334,12 +1344,16 @@ void range_expr() {
         match(TK_RANGE);
         additive_expr();
         emit(OP_RANGE);
+        last_expr_was_range = true;
+    } else {
+        last_expr_was_range = false;
     }
 }
 // 1. Create the AND expression parser
 void logic_and_expr() {
     relation_expr();
     while (curr.type == TK_AND) {
+        last_expr_was_range = false;
         match(TK_AND);
         relation_expr();
         emit(OP_AND);
@@ -1350,6 +1364,7 @@ void logic_and_expr() {
 void logic_or_expr() {
     logic_and_expr(); //
     while (curr.type == TK_OR) {
+        last_expr_was_range = false;
         match(TK_OR);
         logic_and_expr();
         emit(OP_OR);
@@ -1743,33 +1758,50 @@ static void parse_var_decl(char *name) {
         if (type_info.is_array && is_packed_array_type(type_info.id) && curr.type == TK_LBRACKET) {
             match(TK_LBRACKET);
             int count = 0;
+            bool is_single_range = false;
             if (curr.type != TK_RBRACKET) {
                 do {
                     expression();
                     count++;
+                    if (count == 1 && curr.type == TK_RBRACKET && last_expr_was_range) {
+                        is_single_range = true;
+                    }
                     if (curr.type == TK_COMMA) match(TK_COMMA);
                 } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
             }
             match(TK_RBRACKET);
-            emit(OP_MAKE_ARR);
-            emit(count);
-            emit(type_info.id);
+            if (is_single_range) {
+                emit(OP_CAST_ARR);
+                emit(type_info.id);
+            } else {
+                emit(OP_MAKE_ARR);
+                emit(count);
+                emit(type_info.id);
+            }
+            last_expr_was_range = false;
             handled = true;
         }
         else if (type_info.is_array && curr.type == TK_LBRACKET) {
             match(TK_LBRACKET);
             int count = 0;
+            bool is_single_range = false;
             if (curr.type != TK_RBRACKET) {
                 do {
                     if (type_info.id >= 0) parse_struct_literal(type_info.id);
                     else expression();
                     count++;
+                    if (count == 1 && curr.type == TK_RBRACKET && last_expr_was_range) {
+                        is_single_range = true;
+                    }
                     if (curr.type == TK_COMMA) match(TK_COMMA);
                 } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
             }
             match(TK_RBRACKET);
-            emit(OP_ARR);
-            emit(count);
+            if (!is_single_range) {
+                emit(OP_ARR);
+                emit(count);
+            }
+            last_expr_was_range = false;
             handled = true;
         }
         else if (type_info.id >= 0 && !type_info.is_array && curr.type == TK_LBRACE) {
@@ -1792,6 +1824,11 @@ static void parse_var_decl(char *name) {
 
         if (!handled) {
             expression();
+            if (type_info.is_array && is_packed_array_type(type_info.id) && last_expr_was_range) {
+                emit(OP_CAST_ARR);
+                emit(type_info.id);
+            }
+            last_expr_was_range = false;
         }
 
         if (type_info.id != TYPE_ANY && !type_info.is_array) {
@@ -1841,6 +1878,12 @@ static void parse_id_statement(Token start_token, char *name) {
         }
 
         expression();
+
+        if (is_array && is_packed_array_type(var_type) && last_expr_was_range) {
+            emit(OP_CAST_ARR);
+            emit(var_type);
+        }
+        last_expr_was_range = false;
 
         if (loc != -1) {
             if (locals[loc].type_id != TYPE_ANY && !locals[loc].is_array) {

@@ -29,8 +29,8 @@ void disassemble(VM* vm) {
     while (i < vm->code_size) {
         int op = vm->bytecode[i];
 
-        // Updated range check to include OP_EMBED
-        if (op < 0 || op > OP_DEBUGGER) {
+        // Updated range check to include OP_CAST_ARR
+        if (op < 0 || op > OP_CAST_ARR) {
             printf("%04d UNKNOWN %d\n", i, op);
             i++;
             continue;
@@ -104,6 +104,11 @@ void disassemble(VM* vm) {
                 int idx = vm->bytecode[i++];
                 unsigned int packed = (unsigned int)vm->constants[idx];
                 printf("[%d] (Enum %d -> \"%s\")", idx, packed & 0xFFFF, vm->string_pool[(packed >> 16) & 0xFFFF]);
+                break;
+            }
+            case OP_CAST_ARR: {
+                int target = vm->bytecode[i++];
+                printf("(target_type: %d)", target);
                 break;
             }
             default: break;

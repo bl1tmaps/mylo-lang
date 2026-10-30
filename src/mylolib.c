@@ -2697,10 +2697,28 @@ void std_file_write_row(VM *vm) {
   FILE *f = open_file_table[fd];
   char buf[65536];
   int pos = 0;
+  int arr_type = (int)base[HEAP_OFFSET_TYPE];
   for (int i = 0; i < count; i++) {
-    int r = (int)base[HEAP_HEADER_ARRAY + i * 3 + 0] & 0xFF;
-    int g = (int)base[HEAP_HEADER_ARRAY + i * 3 + 1] & 0xFF;
-    int b = (int)base[HEAP_HEADER_ARRAY + i * 3 + 2] & 0xFF;
+    int r = 0, g = 0, b = 0;
+    if (arr_type == TYPE_ARRAY) {
+      r = (int)base[HEAP_HEADER_ARRAY + i * 3 + 0] & 0xFF;
+      g = (int)base[HEAP_HEADER_ARRAY + i * 3 + 1] & 0xFF;
+      b = (int)base[HEAP_HEADER_ARRAY + i * 3 + 2] & 0xFF;
+    } else if (arr_type == TYPE_I32 || arr_type == TYPE_I32_ARRAY) {
+      int *data = (int *)&base[HEAP_HEADER_ARRAY];
+      r = data[i * 3 + 0] & 0xFF;
+      g = data[i * 3 + 1] & 0xFF;
+      b = data[i * 3 + 2] & 0xFF;
+    } else if (arr_type == TYPE_U8 || arr_type == TYPE_BYTES) {
+      unsigned char *data = (unsigned char *)&base[HEAP_HEADER_ARRAY];
+      r = data[i * 3 + 0];
+      g = data[i * 3 + 1];
+      b = data[i * 3 + 2];
+    } else {
+      r = (int)base[HEAP_HEADER_ARRAY + i * 3 + 0] & 0xFF;
+      g = (int)base[HEAP_HEADER_ARRAY + i * 3 + 1] & 0xFF;
+      b = (int)base[HEAP_HEADER_ARRAY + i * 3 + 2] & 0xFF;
+    }
     pos += snprintf(buf + pos, sizeof(buf) - pos, "%d %d %d ", r, g, b);
     if (pos >= (int)sizeof(buf) - 64) {
       fwrite(buf, 1, pos, f);

@@ -64,7 +64,8 @@ typedef enum {
     OP_SCOPE_ENTER,
     OP_SCOPE_EXIT,
     OP_DEBUGGER,
-    OP_PSH_ENUM
+    OP_PSH_ENUM,
+    OP_CAST_ARR
 } OpCode;
 
 extern const char *OP_NAMES[];

@@ -51,7 +51,8 @@ const char *OP_NAMES[] = {
     "AND",
     "RANGE","SCOPE_ENTER", "SCOPE_EXIT",
     "DEBUGGER",
-    "PSH_ENUM"
+    "PSH_ENUM",
+    "CAST_ARR"
 };
 
 
@@ -2013,6 +2014,84 @@ int vm_step(VM* vm, bool debug_trace) {
                 enter_debugger(vm);
             }
             break;
+        case OP_CAST_ARR: {
+            int target_type = vm->bytecode[vm->ip++];
+            CHECK_STACK(1);
+            double val = vm->stack[vm->sp];
+            double* vbase = vm_resolve_ptr(vm, val);
+            if (vbase) {
+                int src_type = (int)vbase[0];
+                if (src_type != target_type) {
+                    int vlen = (int)vbase[1];
+                    int elem_size = get_type_size(target_type);
+                    int doubles_needed;
+                    if (target_type == TYPE_ARRAY) {
+                        doubles_needed = vlen;
+                    } else {
+                        doubles_needed = (vlen * elem_size + 7) / 8;
+                    }
+                    double ptr = heap_alloc(vm, doubles_needed + HEAP_HEADER_ARRAY);
+                    double* base = vm_resolve_ptr(vm, ptr);
+                    int* types = vm_resolve_type(vm, ptr);
+                    vbase = vm_resolve_ptr(vm, val);
+                    base[0] = (double)target_type;
+                    base[1] = (double)vlen;
+                    char* dst = (char*)&base[HEAP_HEADER_ARRAY];
+
+                    for (int i = 0; i < vlen; i++) {
+                        double d = 0;
+                        if (src_type == TYPE_ARRAY) {
+                            d = vbase[HEAP_HEADER_ARRAY + i];
+                        } else {
+                            char* src = (char*)&vbase[HEAP_HEADER_ARRAY];
+                            switch (src_type) {
+                                case TYPE_U8:
+                                case TYPE_BYTES:
+                                case TYPE_BOOL:
+                                case TYPE_BOOL_ARRAY: d = (double)((unsigned char*)src)[i]; break;
+                                case TYPE_I8:         d = (double)((signed char*)src)[i]; break;
+                                case TYPE_U16:        d = (double)((unsigned short*)src)[i]; break;
+                                case TYPE_I16:        d = (double)((short*)src)[i]; break;
+                                case TYPE_F16:        d = (double)((short*)src)[i]; break;
+                                case TYPE_U32:        d = (double)((unsigned int*)src)[i]; break;
+                                case TYPE_I32:        d = (double)((int*)src)[i]; break;
+                                case TYPE_F32:        d = (double)((float*)src)[i]; break;
+                                case TYPE_U64:        d = (double)((unsigned long long*)src)[i]; break;
+                                case TYPE_I64:        d = (double)((long long*)src)[i]; break;
+                                case TYPE_F64:        d = ((double*)src)[i]; break;
+                                default:              d = ((double*)src)[i]; break;
+                            }
+                        }
+
+                        if (target_type == TYPE_ARRAY) {
+                            base[HEAP_HEADER_ARRAY + i] = d;
+                            types[HEAP_HEADER_ARRAY + i] = T_NUM;
+                        } else {
+                            switch (target_type) {
+                                case TYPE_U8:
+                                case TYPE_BYTES:
+                                case TYPE_BOOL:
+                                case TYPE_BOOL_ARRAY: ((unsigned char*)dst)[i] = (unsigned char)d; break;
+                                case TYPE_I8:         ((signed char*)dst)[i] = (signed char)d; break;
+                                case TYPE_U16:        ((unsigned short*)dst)[i] = (unsigned short)d; break;
+                                case TYPE_I16:        ((short*)dst)[i] = (short)d; break;
+                                case TYPE_F16:        ((short*)dst)[i] = (short)d; break;
+                                case TYPE_U32:        ((unsigned int*)dst)[i] = (unsigned int)d; break;
+                                case TYPE_I32:        ((int*)dst)[i] = (int)d; break;
+                                case TYPE_F32:        ((float*)dst)[i] = (float)d; break;
+                                case TYPE_U64:        ((unsigned long long*)dst)[i] = (unsigned long long)d; break;
+                                case TYPE_I64:        ((long long*)dst)[i] = (long long)d; break;
+                                case TYPE_F64:        ((double*)dst)[i] = (double)d; break;
+                                default:              ((double*)dst)[i] = d; break;
+                            }
+                        }
+                    }
+                    vm->stack[vm->sp] = ptr;
+                    vm->stack_types[vm->sp] = T_OBJ;
+                }
+            }
+            break;
+        }
     }
     return op;
 }
