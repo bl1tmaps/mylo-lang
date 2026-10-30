@@ -44,6 +44,8 @@
 #ifdef _WIN32
 // #include <winsock2.h> // This was causing a redefinition failure on MSVC
 #pragma comment(lib, "ws2_32.lib")
+#elif defined(__AMIGA__)
+// No networking/socket headers needed on AmigaOS
 #else
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -2044,6 +2046,30 @@ const char *HTML_SCREEN =
     "es.onerror=(e)=>console.error('SSE Error:', e);"
     "</script></body></html>";
 
+#ifdef __AMIGA__
+static int client_fd = -1;
+
+void std_canvas_init(VM *vm) {
+  printf("Web canvas streaming is not supported on AmigaOS.\n");
+  vm_push(vm, 0.0, T_NUM);
+}
+
+char *base64_encode(const unsigned char *data, size_t input_length) {
+  (void)data; (void)input_length;
+  char *res = malloc(1);
+  if (res) res[0] = '\0';
+  return res;
+}
+
+void send_event_sse(const char *cmd, const char *data) {
+  (void)cmd; (void)data;
+}
+
+void std_web_status(VM *vm) {
+  vm_pop(vm); // Pop wait_for_reconnect
+  vm_push(vm, 0.0, T_NUM);
+}
+#else
 static int server_fd = -1;
 static int client_fd = -1;
 
@@ -2161,6 +2187,7 @@ void std_web_status(VM *vm) {
   // Return 1 if connected, 0 otherwise
   vm_push(vm, client_fd != -1 ? 1.0 : 0.0, T_NUM);
 }
+#endif
 
 // --- Mylo Native Functions ---
 void std_canvas_text(VM *vm) {

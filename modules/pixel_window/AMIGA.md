@@ -65,7 +65,7 @@ echo "======================================================================"
 # -O3: Maximum optimization for inner pixel rendering loops
 CFLAGS="-O3 -m68040 -fomit-frame-pointer -mcrt=clib2"
 INCLUDES="-Isrc -Imodules/pixel_window"
-LIBS="-lm -lnet"
+LIBS="-lm"
 
 OUTPUT_BINARY="mylo_amiga"
 
