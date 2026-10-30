@@ -12,6 +12,7 @@ It is fast to write, fast to run, and can run anywhere.
     * [Technical Intro (for nerds)](#technical-intro-for-nerds)
     * [Variables](#variables)
         + [Numbers and Strings](#numbers-and-strings)
+        + [Monitor](#monitor)
     * [Types](#types)
         + [Primitives](#primitive-types)
         + [Structs](#structs)
@@ -95,6 +96,31 @@ a_string: string = "Hi"
    }
    print(x) // Compiler Error: 'x' does not exist anymore
    ```
+
+
+## Monitor
+
+You can view the current state of the memory, and memory arenas that have been allocated with `monitor()`:
+
+```javascript
+a: i32 = 3
+b: str = "Hello World"
+monitor()
+```
+
+Output:
+```bash
+  Memory Monitor                                                                                                                                                                                                                                                                                                          
+  Arenas                                                                                                                                                                                                                                                                                                                  
+  Current Arena: 0, Head: 0 / 1048576
+
+   Globals                                                                                                                                                                                                                                                                                                                
+  a: 3
+  b: Hello World
+
+   Locals (Frame #0)                                                                                                                                                                                                                                                                                                      
+  (None)
+```
 
 <a name="types"></a>
 ## Types
