@@ -62,7 +62,22 @@
         "command": "mylo.initProject",
         "title": "Mylo: Init Project"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Mylo",
+      "properties": {
+        "mylo.lsp.path": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to the Mylo Language Server executable (mylo-lsp)"
+        },
+        "mylo.path": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to the Mylo runtime executable"
+        }
+      }
+    }
   },
   "activationEvents": [
     "onDebugResolve:mylo",
