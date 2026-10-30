@@ -242,7 +242,7 @@ Because `pw_*` and `td_*` symbols are resident in `mylo_amiga`, the interpreter 
 ### Compiling to a Standalone Amiga Executable (Ahead-Of-Time):
 You can also generate an optimized C source file:
 ```bash
-./mylo_amiga --build amiga_demo.mylo
+./mylo --build amiga_demo.mylo
 ```
 This produces `out.c`. Then compile `out.c` directly with `m68k-amigaos-gcc`:
 ```bash
