@@ -33,6 +33,7 @@ SOURCES=(
     "$MYLO_ROOT/src/utils.c"
     "$MYLO_ROOT/src/mylolib.c"
     "$MYLO_ROOT/src/debug_adapter.c"
+    "$MYLO_ROOT/src/amiga_setjmp.s"
     "$SCRIPT_DIR/pixel_window_impl.c"
 )
 

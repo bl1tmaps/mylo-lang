@@ -125,18 +125,12 @@ void print_greeting() {
     printf("Type 'exit' to quit.\n");
 }
 
-void start_repl() {
+void start_repl(VM *vm) {
     char buffer[MAX_INPUT];
     char line_buf[MAX_INPUT];
 
     // Setup
     print_greeting();
-
-    // Instantiate VM
-    VM vm;
-    memset(&vm, 0, sizeof(vm));
-    vm_init(&vm);
-    compiler_reset();
 
     // 1. Setup Error Recovery Environment
     jmp_buf repl_env;
@@ -152,7 +146,7 @@ void start_repl() {
         // setjmp returns 0 normally. It returns 1 if an error occurred and we jumped back.
         if (setjmp(repl_env) != 0) {
             // We just crashed! Reset state to survive.
-            vm.sp = -1;       // Clear Stack
+            vm->sp = -1;       // Clear Stack
             open_braces = 0;  // Reset multiline parsing
             buffer[0] = '\0'; // Clear input buffer
 
@@ -189,7 +183,6 @@ void start_repl() {
         // 3. If braces are balanced, Compile & Run
         if (open_braces <= 0) {
             open_braces = 0; // Reset safety
-
             // Skip empty lines
             if (strlen(buffer) == 0 || buffer[0] == '\n') {
                 buffer[0] = '\0';
@@ -197,14 +190,14 @@ void start_repl() {
             }
 
             int start_ip = 0;
-            compile_repl(&vm, buffer, &start_ip);
+            compile_repl(vm, buffer, &start_ip);
 
-            int stack_start = vm.sp;
-            run_vm_from(&vm, start_ip, false);
+            int stack_start = vm->sp;
+            run_vm_from(vm, start_ip, false);
 
-            if (vm.sp > stack_start) {
-                double val = vm.stack[vm.sp];
-                int type = vm.stack_types[vm.sp];
+            if (vm->sp > stack_start) {
+                double val = vm->stack[vm->sp];
+                int type = vm->stack_types[vm->sp];
 
                 // Simple printer
                 setTerminalColor(MyloFgCyan, MyloBgColorDefault);
@@ -212,13 +205,13 @@ void start_repl() {
                     printf("%g\n", val);
                 }
                 else if (type == T_STR) {
-                    printf("\"%s\"\n", vm.string_pool[(int)val]);
+                    printf("\"%s\"\n", vm->string_pool[(int)val]);
                 }
                 else if (type == T_OBJ) {
                     printf("[Object]\n");
                 }
                 setTerminalColor(MyloFgDefault, MyloBgColorDefault);
-                vm.sp = stack_start;
+                vm->sp = stack_start;
             }
 
             // Clear buffer for next command
@@ -226,8 +219,6 @@ void start_repl() {
         }
         // Else: Loop again to get next line (buffer is preserved)
     }
-
-    vm_cleanup(&vm);
 }
 
 // Start - Help formatting
@@ -383,8 +374,9 @@ int main(int argc, char** argv) {
     }
 
     if (repl_mode) {
-        get_executable_dir(mylo_exe_dir, sizeof(mylo_exe_dir), argv[0]);        // start_repl manages its own VM cycle usually, but since we have one, we could pass it or just cleanup and call start_repl
-        start_repl();
+        get_executable_dir(mylo_exe_dir, sizeof(mylo_exe_dir), argv[0]);
+        start_repl(&vm);
+        vm_cleanup(&vm);
         return 0;
     }
 
