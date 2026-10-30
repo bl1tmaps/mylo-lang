@@ -2957,7 +2957,8 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     }
     fprintf(fp, "};\n\n");
 
-    fprintf(fp, "char string_pool[%d][%d] = {\n", MAX_STRINGS, MAX_STRING_LENGTH);
+    int pool_count = vm->str_count > 0 ? vm->str_count : 1;
+    fprintf(fp, "char string_pool[%d][%d] = {\n", pool_count, MAX_STRING_LENGTH);
     for (int i = 0; i < vm->str_count; i++) {
         fprintf(fp, "  \"");
         for (int j = 0; j < MAX_STRING_LENGTH; j++) {
@@ -2990,6 +2991,20 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
 
     // Main Entry Point
     fprintf(fp, "int main(int argc, char** argv) {\n");
+    fprintf(fp, "    if (argc > 0 && argv[0]) {\n");
+    fprintf(fp, "        char *last_slash = strrchr(argv[0], '/');\n");
+    fprintf(fp, "#ifdef _WIN32\n");
+    fprintf(fp, "        char *last_bslash = strrchr(argv[0], '\\\\');\n");
+    fprintf(fp, "        if (last_bslash && (!last_slash || last_bslash > last_slash)) last_slash = last_bslash;\n");
+    fprintf(fp, "#endif\n");
+    fprintf(fp, "        if (last_slash) {\n");
+    fprintf(fp, "            int dir_len = (int)(last_slash - argv[0]);\n");
+    fprintf(fp, "            if (dir_len > 0 && dir_len < sizeof(mylo_exe_dir) - 1) {\n");
+    fprintf(fp, "                strncpy(mylo_exe_dir, argv[0], dir_len);\n");
+    fprintf(fp, "                mylo_exe_dir[dir_len] = '\\0';\n");
+    fprintf(fp, "            }\n");
+    fprintf(fp, "        }\n");
+    fprintf(fp, "    }\n\n");
     // Instantiate VM on stack or heap
     fprintf(fp, "    VM vm;\n");
     fprintf(fp, "    vm_init(&vm);\n\n");

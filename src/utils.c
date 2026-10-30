@@ -11,8 +11,6 @@
 #include <sys/stat.h>
 #endif
 
-char mylo_exe_dir[1024] = ".";
-
 char *read_file(const char *fn) {
   FILE *f = fopen(fn, "rb");
   if (!f) return NULL;

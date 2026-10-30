@@ -23,6 +23,7 @@
 // --- Global Instance ---
 // VM vm; // REMOVED GLOBAL VM
 MyloConfigType MyloConfig = {false, false, false, NULL, NULL, NULL};
+char mylo_exe_dir[1024] = ".";
 
 // --- Opcodes String Representation ---
 const char *OP_NAMES[] = {
@@ -2180,7 +2181,6 @@ bool load_self_contained(VM* vm, const char* exe_path) {
             void* lib = load_library(deps[i].name);
 
             if (!lib) {
-                extern char mylo_exe_dir[1024];
                 char exe_path[1024];
                 const char* clean_name = deps[i].name;
 

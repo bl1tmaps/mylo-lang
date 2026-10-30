@@ -69,6 +69,7 @@ typedef enum {
 } OpCode;
 
 extern const char *OP_NAMES[];
+extern char mylo_exe_dir[1024];
 
 typedef struct {
     char name[64];
