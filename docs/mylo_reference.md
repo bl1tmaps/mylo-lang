@@ -910,8 +910,8 @@ Raylib's Image object is utilised.
 ```javascript
 import C "raylib.h"
 
-// 1. Return an ID (num)
-var img_id: num = C() -> num {
+// 1. Return an ID (handle)
+img_id: i32 = C() -> i32 {
     Image raw = LoadImage("cat.png");
     // "Image" is hashed automatically
     // and is used to remember the type.
@@ -919,11 +919,11 @@ var img_id: num = C() -> num {
 }
 
 // Back in Mylo ...
-// img_id is just a handle (num), and is only meaningful to C.
+// img_id is just a handle (i32), and is only meaningful to C.
 print(img_id)
 
 // img_id is now passed back to C
-C(id: num = img_id) {
+C(id: i32 = img_id) {
     // 2. Retrieve it safely
     // Checks if ID exists AND if the stored hash matches hash("Image")
     Image* img = MYLO_RETRIEVE(id, Image, "Image");
@@ -948,8 +948,8 @@ C() {
 
 // Arguments still work
 x: i32 = 10
-C(v: num = x) {
-    printf("Value is: %f\n", v);
+C(v: i32 = x) {
+    printf("Value is: %d\n", v);
 }
 
 // This will now throw an error, you can't have a function 
@@ -974,25 +974,36 @@ C() {
 ### C-Function: Calling native C functions by prototype
 
 Mylo allows functions from C, such as `atoi` below, to be called
-directly by declaring them as a `cfn` (c-function). The input, and return 
+directly by declaring them as a `cfn` (c-function). The input and return 
 types must be provided.
-```
-// 'cfn' defines a c function, in this case
+```javascript
+// 'cfn' defines a C function, in this case
 // the standard library atoi. It *must* also
-// have the correct return type, otherwise it
-// will return null
-cfn atoi(x : str) -> f32
+// have the correct return type.
+cfn atoi(x: str) -> f32
 // Prints 7
 print(f"{atoi("7")}")
 ```
 
-#### Above C code generation
-The above, when compiled generates this c code:
-```
+#### Automatic Runtime Dynamic Resolution
+When running in interpreted mode (`./mylo script.mylo`), Mylo automatically attempts to resolve `cfn` symbols from the running host process and loaded libraries at compile/load time.
+- If the symbol is found (for example standard C library functions or functions linked into Mylo), Mylo dynamically binds and executes it directly in interpreter mode without requiring a compilation step.
+- If the symbol is not found (for example, functions from an external library that is not yet linked or provided via shared library), Mylo reports:
+  ```
+  error: native function <name> was not found, either build mylo with these libraries, or provide shared libraries
+  Error: This program contains Native C blocks and no shared objects are found, so it cannot be interpreted.
+  Please compile it to bytecode using: mylo --build <file>.mylo
+  ```
+  with terminal syntax highlighting.
+
+#### C Code Generation for Native Builds
+When compiled using `mylo --build script.mylo`, Mylo generates standard C wrappers:
+```c
 float __mylo_user_0(VM* vm, char* x) {
     return atoi(x);
 }
 ```
+and registers the wrapper into the native dispatch table in `out.c`.
 
 <a name="dynamically-running-native-code---c-bindings"></a>
 ## Dynamically Running Native Code - C Bindings
@@ -1000,18 +1011,18 @@ float __mylo_user_0(VM* vm, char* x) {
 ### Building a Dynamic C Library, to use in the Mylo Interpreter
 
 Building the mylo application hinders the ability the test and extend an
-intpreted Mylo application. We can build a binding to allow Mylo to load
+interpreted Mylo application. We can build a binding to allow Mylo to load
 compiled C code and use them. Here is a simple example included below.
 
 You will need two files: the Library (test_lib.mylo) containing the C code, and the App (test_app.mylo) that imports and runs it.
 
 ### 1. The Library (test_lib.mylo)
 This file defines the C functionality we want to share. It is a regular Mylo file,
-but had inline C.
+but has inline C.
 
 ```javascript
-fn add(a: num, b: num) {
-    r: i32 = C(a: num = a, b: num = b) -> num {
+fn add(a: i32, b: i32) {
+    r: i32 = C(a: i32 = a, b: i32 = b) -> i32 {
         return a + b;
     }
     ret r

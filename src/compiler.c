@@ -79,25 +79,9 @@ typedef struct {
 } Token;
 
 typedef struct {
-    char name[MAX_IDENTIFIER];
-    char type[MAX_IDENTIFIER];
-} FFIArg;
-
-typedef struct {
-    int id;
-    char func_name[MAX_IDENTIFIER];
-    char code_body[MAX_C_BLOCK_SIZE];
-    FFIArg args[MAX_FFI_ARGS];
-    int arg_count;
-    char return_type[MAX_IDENTIFIER];
-} FFIBlock;
-
-// --- [INSERT] TypeInfo Definition ---
-typedef struct {
     int id;
     bool is_array;
 } TypeInfo;
-// ------------------------------------
 
 FFIBlock ffi_blocks[MAX_NATIVES];
 int ffi_count = 0;
@@ -339,6 +323,145 @@ void get_mangled_name(char *out, char *raw_name) {
     }
 }
 
+void dynamic_cfn_invoker(VM* vm) {
+    int id = vm->bytecode[vm->ip - 1];
+    int std_count = 0;
+    while (std_library[std_count].name != NULL) std_count++;
+    int ffi_idx = id - std_count;
+    if (ffi_idx < 0 || ffi_idx >= ffi_count) {
+        printf("Runtime Error: Invalid dynamic FFI call ID %d\n", id);
+        mylo_exit(1);
+    }
+    FFIBlock *block = &ffi_blocks[ffi_idx];
+    if (!block->native_symbol) {
+        printf("Runtime Error: Native function '%s' is not bound\n", block->c_symbol_name);
+        mylo_exit(1);
+    }
+
+    double raw_args[MAX_FFI_ARGS];
+    for (int a = block->arg_count - 1; a >= 0; a--) {
+        raw_args[a] = vm_pop(vm);
+    }
+
+    uintptr_t a_int[MAX_FFI_ARGS] = {0};
+    double a_dbl[MAX_FFI_ARGS] = {0};
+    bool has_float_arg = false;
+
+    for (int a = 0; a < block->arg_count; a++) {
+        char *type = block->args[a].type;
+        if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) {
+            int sid = (int)raw_args[a];
+            const char *s = (sid >= 0 && sid < vm->str_count) ? vm->string_pool[sid] : "";
+            a_int[a] = (uintptr_t)s;
+        } else if (strcmp(type, "f32") == 0 || strcmp(type, "f64") == 0) {
+            a_dbl[a] = raw_args[a];
+            a_int[a] = (uintptr_t)(int64_t)raw_args[a];
+            has_float_arg = true;
+        } else if (strcmp(type, "bytes") == 0 || strstr(type, "[]")) {
+            void *ptr = (void*)(vm_resolve_ptr(vm, raw_args[a]) + HEAP_HEADER_ARRAY);
+            a_int[a] = (uintptr_t)ptr;
+        } else if (strcmp(type, "i32") == 0 || strcmp(type, "i64") == 0 || strcmp(type, "i16") == 0 ||
+                   strcmp(type, "i8") == 0 || strcmp(type, "u8") == 0 || strcmp(type, "u16") == 0 ||
+                   strcmp(type, "u32") == 0 || strcmp(type, "u64") == 0 || strcmp(type, "bool") == 0 ||
+                   strcmp(type, "byte") == 0 || strcmp(type, "num") == 0) {
+            a_int[a] = (uintptr_t)(int64_t)raw_args[a];
+        } else {
+            void *ptr = (void*)(vm_resolve_ptr(vm, raw_args[a]) + HEAP_HEADER_STRUCT);
+            a_int[a] = (uintptr_t)ptr;
+        }
+    }
+
+    void *fn = block->native_symbol;
+
+    if (strcmp(block->return_type, "void") == 0) {
+        if (!has_float_arg) {
+            switch (block->arg_count) {
+                case 0: ((void (*)())fn)(); break;
+                case 1: ((void (*)(uintptr_t))fn)(a_int[0]); break;
+                case 2: ((void (*)(uintptr_t, uintptr_t))fn)(a_int[0], a_int[1]); break;
+                case 3: ((void (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2]); break;
+                case 4: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3]); break;
+                case 5: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4]); break;
+                case 6: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5]); break;
+                case 7: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6]); break;
+                case 8: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7]); break;
+                default: printf("Dynamic CFN supports up to 8 arguments\n"); mylo_exit(1);
+            }
+        } else {
+            if (block->arg_count == 1) ((void (*)(double))fn)(a_dbl[0]);
+            else if (block->arg_count == 2) ((void (*)(double, double))fn)(a_dbl[0], a_dbl[1]);
+        }
+        vm_push(vm, 0.0, T_NUM);
+        return;
+    }
+
+    if (strcmp(block->return_type, "str") == 0 || strcmp(block->return_type, "string") == 0) {
+        const char *ret_s = NULL;
+        switch (block->arg_count) {
+            case 0: ret_s = ((const char* (*)())fn)(); break;
+            case 1: ret_s = ((const char* (*)(uintptr_t))fn)(a_int[0]); break;
+            case 2: ret_s = ((const char* (*)(uintptr_t, uintptr_t))fn)(a_int[0], a_int[1]); break;
+            case 3: ret_s = ((const char* (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2]); break;
+            case 4: ret_s = ((const char* (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3]); break;
+            default: break;
+        }
+        int sid = make_string(vm, ret_s ? (char*)ret_s : "");
+        vm_push(vm, (double)sid, T_STR);
+        return;
+    }
+
+    if (strcmp(block->return_type, "f64") == 0 || (strcmp(block->return_type, "f32") == 0 && strcmp(block->c_symbol_name, "atoi") != 0)) {
+        double ret_d = 0.0;
+        if (strcmp(block->return_type, "f32") == 0) {
+            if (!has_float_arg) {
+                switch (block->arg_count) {
+                    case 0: ret_d = ((float (*)())fn)(); break;
+                    case 1: ret_d = ((float (*)(uintptr_t))fn)(a_int[0]); break;
+                    case 2: ret_d = ((float (*)(uintptr_t, uintptr_t))fn)(a_int[0], a_int[1]); break;
+                    case 3: ret_d = ((float (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2]); break;
+                    case 4: ret_d = ((float (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3]); break;
+                    default: break;
+                }
+            } else {
+                if (block->arg_count == 1) ret_d = ((float (*)(float))fn)((float)a_dbl[0]);
+                else if (block->arg_count == 2) ret_d = ((float (*)(float, float))fn)((float)a_dbl[0], (float)a_dbl[1]);
+            }
+        } else {
+            if (!has_float_arg) {
+                switch (block->arg_count) {
+                    case 0: ret_d = ((double (*)())fn)(); break;
+                    case 1: ret_d = ((double (*)(uintptr_t))fn)(a_int[0]); break;
+                    case 2: ret_d = ((double (*)(uintptr_t, uintptr_t))fn)(a_int[0], a_int[1]); break;
+                    case 3: ret_d = ((double (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2]); break;
+                    case 4: ret_d = ((double (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3]); break;
+                    default: break;
+                }
+            } else {
+                if (block->arg_count == 1) ret_d = ((double (*)(double))fn)(a_dbl[0]);
+                else if (block->arg_count == 2) ret_d = ((double (*)(double, double))fn)(a_dbl[0], a_dbl[1]);
+            }
+        }
+        vm_push(vm, ret_d, T_NUM);
+        return;
+    }
+
+    // Default: Integer / pointer return (i32, i64, bool, atoi, etc.)
+    intptr_t ret_i = 0;
+    switch (block->arg_count) {
+        case 0: ret_i = ((intptr_t (*)())fn)(); break;
+        case 1: ret_i = ((intptr_t (*)(uintptr_t))fn)(a_int[0]); break;
+        case 2: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t))fn)(a_int[0], a_int[1]); break;
+        case 3: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2]); break;
+        case 4: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3]); break;
+        case 5: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4]); break;
+        case 6: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5]); break;
+        case 7: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6]); break;
+        case 8: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7]); break;
+        default: printf("Dynamic CFN supports up to 8 arguments\n"); mylo_exit(1);
+    }
+    vm_push(vm, (double)ret_i, T_NUM);
+}
+
 static void parse_cfn_decl() {
     match(TK_CFN);
     char name[MAX_IDENTIFIER];
@@ -351,8 +474,12 @@ static void parse_cfn_decl() {
     int ffi_idx = ffi_count++;
     ffi_blocks[ffi_idx].id = ffi_idx;
     ffi_blocks[ffi_idx].arg_count = 0;
+    strcpy(ffi_blocks[ffi_idx].c_symbol_name, name);
     strcpy(ffi_blocks[ffi_idx].func_name, mangled_name);
     strcpy(ffi_blocks[ffi_idx].return_type, "void");
+    ffi_blocks[ffi_idx].native_symbol = NULL;
+    ffi_blocks[ffi_idx].is_bound = false;
+    ffi_blocks[ffi_idx].is_cfn = true;
     match(TK_LPAREN);
     while (curr.type != TK_RPAREN && curr.type != TK_EOF) {
         if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) error("Too many FFI args");
@@ -401,6 +528,23 @@ static void parse_cfn_decl() {
     }
     strcat(call_str, ");");
     strcpy(ffi_blocks[ffi_idx].code_body, call_str);
+
+    if (!MyloConfig.build_mode) {
+        void *sym = get_symbol(NULL, name);
+        if (!sym && strcmp(mangled_name, name) != 0) {
+            sym = get_symbol(NULL, mangled_name);
+        }
+        if (sym) {
+            ffi_blocks[ffi_idx].native_symbol = sym;
+            ffi_blocks[ffi_idx].is_bound = true;
+            bound_ffi_count++;
+            if (compiling_vm) {
+                int std_count = 0;
+                while (std_library[std_count].name != NULL) std_count++;
+                compiling_vm->natives[std_count + ffi_idx] = dynamic_cfn_invoker;
+            }
+        }
+    }
 }
 
 // Pass in the current depths right before entering the loop body
@@ -761,6 +905,17 @@ void compiler_reset() {
     func_count = 0;
     struct_count = 0;
     enum_entry_count = 0;
+    for (int i = 0; i < MAX_NATIVES; i++) {
+        ffi_blocks[i].id = 0;
+        ffi_blocks[i].c_symbol_name[0] = '\0';
+        ffi_blocks[i].func_name[0] = '\0';
+        ffi_blocks[i].code_body[0] = '\0';
+        ffi_blocks[i].arg_count = 0;
+        ffi_blocks[i].return_type[0] = '\0';
+        ffi_blocks[i].native_symbol = NULL;
+        ffi_blocks[i].is_bound = false;
+        ffi_blocks[i].is_cfn = false;
+    }
     ffi_count = 0;
     bound_ffi_count = 0;
     debug_symbol_count = 0;
@@ -858,16 +1013,24 @@ static void c_gen_type_name(FILE* fp, const char* type, bool is_return) {
     else if (strcmp(type, "i32") == 0) fprintf(fp, "int");
     else if (strcmp(type, "i64") == 0) fprintf(fp, "long long");
     else if (strcmp(type, "f32") == 0) fprintf(fp, "float");
+    else if (strcmp(type, "f64") == 0) fprintf(fp, "double");
     else if (strcmp(type, "i16") == 0) fprintf(fp, "short");
-    else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0) fprintf(fp, "unsigned char");
-
+    else if (strcmp(type, "i8") == 0) fprintf(fp, "signed char");
+    else if (strcmp(type, "u8") == 0 || strcmp(type, "byte") == 0) fprintf(fp, "unsigned char");
+    else if (strcmp(type, "u16") == 0) fprintf(fp, "unsigned short");
+    else if (strcmp(type, "u32") == 0) fprintf(fp, "unsigned int");
+    else if (strcmp(type, "u64") == 0) fprintf(fp, "unsigned long long");
+    else if (strcmp(type, "bool") == 0) fprintf(fp, "unsigned char");
+    else if (strcmp(type, "bytes") == 0) fprintf(fp, "unsigned char*");
     else if (strstr(type, "[]")) {
         if (is_return) {
             fprintf(fp, "MyloReturn");
         } else {
-            if (strstr(type, "byte") || strstr(type, "bool")) fprintf(fp, "unsigned char*");
+            if (strstr(type, "byte") || strstr(type, "bool") || strstr(type, "u8")) fprintf(fp, "unsigned char*");
             else if (strstr(type, "i32")) fprintf(fp, "int*");
+            else if (strstr(type, "i64") || strstr(type, "u64")) fprintf(fp, "long long*");
             else if (strstr(type, "f32")) fprintf(fp, "float*");
+            else if (strstr(type, "f64")) fprintf(fp, "double*");
             else fprintf(fp, "void*");
         }
     }
@@ -886,12 +1049,14 @@ static void c_gen_ffi_wrappers(FILE *fp) {
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
             c_gen_type_name(fp, type, false);
-             if (strlen(type) > 0 && strcmp(type, "num") != 0 && !strstr(type, "[]") &&
-                 strcmp(type, "i32")!=0 && strcmp(type, "i64")!=0 && strcmp(type, "f32")!=0 &&
-                 strcmp(type, "i16")!=0 && strcmp(type, "bool")!=0 && strcmp(type, "byte")!=0 &&
-                 strcmp(type, "str")!=0 && strcmp(type, "string")!=0 && strcmp(type, "bytes")!=0) {
-                 fprintf(fp, "*");
-             }
+            if (strlen(type) > 0 && strcmp(type, "num") != 0 && !strstr(type, "[]") &&
+                strcmp(type, "i32")!=0 && strcmp(type, "i64")!=0 && strcmp(type, "f32")!=0 && strcmp(type, "f64")!=0 &&
+                strcmp(type, "i16")!=0 && strcmp(type, "i8")!=0 && strcmp(type, "u8")!=0 && strcmp(type, "u16")!=0 &&
+                strcmp(type, "u32")!=0 && strcmp(type, "u64")!=0 &&
+                strcmp(type, "bool")!=0 && strcmp(type, "byte")!=0 &&
+                strcmp(type, "str")!=0 && strcmp(type, "string")!=0 && strcmp(type, "bytes")!=0) {
+                fprintf(fp, "*");
+            }
             fprintf(fp, " %s", ffi_blocks[i].args[a].name);
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
@@ -918,32 +1083,37 @@ static void c_gen_ffi_wrappers(FILE *fp) {
             char *name = ffi_blocks[i].args[a].name;
             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) fprintf(
                 fp, "vm->string_pool[(int)_raw_%s]", name);
-            else if (strcmp(type, "num") == 0) fprintf(fp, "_raw_%s", name);
+            else if (strcmp(type, "num") == 0 || strcmp(type, "f64") == 0) fprintf(fp, "_raw_%s", name);
             else if (strcmp(type, "i32") == 0) fprintf(fp, "(int)_raw_%s", name);
             else if (strcmp(type, "i64") == 0) fprintf(fp, "(long long)_raw_%s", name);
             else if (strcmp(type, "f32") == 0) fprintf(fp, "(float)_raw_%s", name);
             else if (strcmp(type, "i16") == 0) fprintf(fp, "(short)_raw_%s", name);
-            else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0) fprintf(
+            else if (strcmp(type, "i8") == 0) fprintf(fp, "(signed char)_raw_%s", name);
+            else if (strcmp(type, "u8") == 0 || strcmp(type, "byte") == 0 || strcmp(type, "bool") == 0) fprintf(
                 fp, "(unsigned char)_raw_%s", name);
-            else if (strcmp(type, "bytes") == 0) fprintf(
+            else if (strcmp(type, "u16") == 0) fprintf(fp, "(unsigned short)_raw_%s", name);
+            else if (strcmp(type, "u32") == 0) fprintf(fp, "(unsigned int)_raw_%s", name);
+            else if (strcmp(type, "u64") == 0) fprintf(fp, "(unsigned long long)_raw_%s", name);
+            else if (strcmp(type, "bytes") == 0 || strcmp(type, "byte[]") == 0 || strcmp(type, "bool[]") == 0 || strcmp(type, "u8[]") == 0) fprintf(
                 fp, "(unsigned char*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else if (strcmp(type, "byte[]") == 0 || strcmp(type, "bool[]") == 0) fprintf(fp, "(unsigned char*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
             else if (strcmp(type, "i32[]") == 0) fprintf(fp, "(int*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
             else if (strcmp(type, "i64[]") == 0) fprintf(fp, "(long long*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
             else if (strcmp(type, "f32[]") == 0) fprintf(fp, "(float*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else if (strcmp(type, "i16[]") == 0) fprintf(fp, "(short*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
+            else if (strcmp(type, "f64[]") == 0) fprintf(fp, "(double*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
             else if (strstr(type, "[]")) fprintf(fp, "(void*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
             else fprintf(fp, "(c_%s*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_STRUCT)", type, name);
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
         fprintf(fp, ");\n");
 
-        if (strcmp(ret_type, "num") == 0) fprintf(fp, "    vm_push(vm, res, T_NUM);\n");
+        if (strcmp(ret_type, "num") == 0 || strcmp(ret_type, "f64") == 0) fprintf(fp, "    vm_push(vm, res, T_NUM);\n");
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(vm, 0.0, T_NUM);\n");
         else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) fprintf(
             fp, "    int id = make_string(vm, res);\n    vm_push(vm, (double)id, T_STR);\n");
         else if (strcmp(ret_type, "i32") == 0 || strcmp(ret_type, "i64") == 0 || strcmp(ret_type, "f32") == 0 ||
-                 strcmp(ret_type, "i16") == 0 || strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0)
+                 strcmp(ret_type, "i16") == 0 || strcmp(ret_type, "i8") == 0 || strcmp(ret_type, "u8") == 0 ||
+                 strcmp(ret_type, "u16") == 0 || strcmp(ret_type, "u32") == 0 || strcmp(ret_type, "u64") == 0 ||
+                 strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0)
             fprintf(fp, "    vm_push(vm, (double)res, T_NUM);\n");
         else if (strlen(ret_type) > 0) {
 
@@ -1033,9 +1203,13 @@ void factor() {
         match(TK_ID);
         int ffi_idx = ffi_count++;
         ffi_blocks[ffi_idx].id = ffi_idx;
+        ffi_blocks[ffi_idx].c_symbol_name[0] = '\0';
         ffi_blocks[ffi_idx].func_name[0] = '\0';
         ffi_blocks[ffi_idx].arg_count = 0;
         ffi_blocks[ffi_idx].return_type[0] = '\0';
+        ffi_blocks[ffi_idx].native_symbol = NULL;
+        ffi_blocks[ffi_idx].is_bound = false;
+        ffi_blocks[ffi_idx].is_cfn = false;
 
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
@@ -1478,9 +1652,13 @@ static void parse_c_block_stmt() {
     match(TK_ID);
     int ffi_idx = ffi_count++;
     ffi_blocks[ffi_idx].id = ffi_idx; 
+    ffi_blocks[ffi_idx].c_symbol_name[0] = '\0';
     ffi_blocks[ffi_idx].func_name[0] = '\0';
     ffi_blocks[ffi_idx].arg_count = 0;
     strcpy(ffi_blocks[ffi_idx].return_type, "void");
+    ffi_blocks[ffi_idx].native_symbol = NULL;
+    ffi_blocks[ffi_idx].is_bound = false;
+    ffi_blocks[ffi_idx].is_cfn = false;
 
     if (curr.type == TK_LPAREN) {
         match(TK_LPAREN);
@@ -1647,9 +1825,13 @@ static void parse_import() {
         }
         int ffi_idx = ffi_count++;
         ffi_blocks[ffi_idx].id = ffi_idx;
+        ffi_blocks[ffi_idx].c_symbol_name[0] = '\0';
         ffi_blocks[ffi_idx].func_name[0] = '\0';
         ffi_blocks[ffi_idx].arg_count = 0;
         strcpy(ffi_blocks[ffi_idx].return_type, "void");
+        ffi_blocks[ffi_idx].native_symbol = NULL;
+        ffi_blocks[ffi_idx].is_bound = false;
+        ffi_blocks[ffi_idx].is_cfn = false;
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
             while (curr.type != TK_RPAREN) {
@@ -3032,7 +3214,7 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     fprintf(fp, "    }\n");
 
     fprintf(fp, "    // Register FFI Wrappers\n");
-    for (int i = 0; i < ffi_count; i++) fprintf(fp, "    vm.natives[i + %d] = __wrapper_%d;\n", bound_ffi_count + i, i);
+    for (int k = 0; k < ffi_count; k++) fprintf(fp, "    vm.natives[i + %d] = __wrapper_%d;\n", k, k);
 
     fprintf(fp, "\n    // Run\n");
     fprintf(fp, "    run_vm(&vm, false);\n");

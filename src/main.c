@@ -441,6 +441,12 @@ int main(int argc, char** argv) {
 
     // --- INTERPRETER SAFETY CHECK ---
     if ((ffi_count - bound_ffi_count) > 0) {
+        for (int i = 0; i < ffi_count; i++) {
+            if (ffi_blocks[i].is_cfn && !ffi_blocks[i].is_bound) {
+                setTerminalColor(MyloFgRed, MyloBgColorDefault);
+                printf("error: native function %s was not found, either build mylo with these libraries, or provide shared libraries\n", ffi_blocks[i].c_symbol_name);
+            }
+        }
         setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
         printf("Error: This program contains Native C blocks and no shared objects are found, so it cannot be interpreted.\n");
         setTerminalColor(MyloFgCyan, MyloBgColorDefault);

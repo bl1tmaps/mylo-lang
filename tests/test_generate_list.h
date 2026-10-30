@@ -1576,6 +1576,14 @@ inline TestOutput test_bracketed_range_array() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_cfn_dynamic_resolution() {
+    std::string src =
+    "cfn atoi(x: str) -> f32\n"
+    "print(f\"{atoi(\"42\")}\")\n";
+    std::string expected = "42\n";
+    return run_source_test(src, expected);
+}
+
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
     ADD_TEST("Test Print", test_hello_world);
@@ -1675,6 +1683,7 @@ inline void test_generate_list() {
     ADD_TEST("Test All Strict Types", test_all_strict_types);
     ADD_TEST("Test Num Type Removed Error", test_num_type_removed_error);
     ADD_TEST("Test Bracketed Range Array", test_bracketed_range_array);
+    ADD_TEST("Test CFN Dynamic Resolution", test_cfn_dynamic_resolution);
 
 
 }

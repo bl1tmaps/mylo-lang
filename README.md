@@ -23,7 +23,7 @@ Hello Mylo
 ## Something a bit more complex
 Here is fib.mylo:
 ```javascript
-fn fib(n) {
+fn fib(n: i32) -> i32 {
   if (n < 2) {
     ret n
   }
@@ -31,7 +31,7 @@ fn fib(n) {
   ret fib(n - 1) + fib(n - 2)
 }
 print("Calculating Fib(10)...")
-var result = fib(10)
+result: i32 = fib(10)
 // With string interpolation
 print(f"result : {result}")
 ```
@@ -131,7 +131,7 @@ Mylo supports debugging in the command line using the `--db` flag. The Mylo prog
 ➤    1 │ system_thread("sleep 2 && echo Done", "my_job")                                                                                                                                                                                                                                                                  
      2 │                                                                                                                                                                                                                                                                                                                  
      3 │ forever {                                                                                                                                                                                                                                                                                                        
-     4 │     var res = get_job("my_job")                                                                                                                                                                                                                                                                                  
+     4 │     res: any = get_job("my_job")                                                                                                                                                                                                                                                                                  
      5 │     if (res == 1) {                                                                                                                                                                                                                                                                                              
      6 │         print("Working...")                                                                                                                                                                                                                                                                                      
      7 │     } else {                                                                                                                                                                                                                                                                                                     
@@ -156,29 +156,63 @@ Mylo supports debugging in the command line using the `--db` flag. The Mylo prog
     // q          Quit
 ```
 
+## Strict Type System & Scoped Arenas
+
+Mylo is strictly and statically typed without `var` or generic `num`. Variables are declared with explicit annotations:
+```javascript
+count: i32 = 42
+pi: f64 = 3.14159265359
+active: bool = true
+buffer: u8[] = [0, 128, 255]
+range_arr: i32[] = [0...10]
+```
+
+### Supported Types
+- **Integers**: `u8` (or `byte`), `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`
+- **Floating Point**: `f32`, `f64`
+- **Text & Binary**: `str` (or `string`), `bytes`
+- **Typed Arrays**: `T[]` (e.g. `i32[]`, `u8[]`, `f32[]`, `f64[]`)
+- **Containers**: `array`, `map`
+- **Structures**: Custom typed `struct` definitions
+
+### Generational Scoped Arenas
+Mylo provides lexical scoped memory arenas for zero-overhead deterministic allocations:
+```javascript
+region {
+    temp: i32[] = [0...1000]
+    // Memory inside region is automatically cleaned up at scope exit
+}
+```
+
 ## But everything cool is written in C, how do I use those libraries?
 
-### Seamlessly call C
-Mylo allows functions from C, such as `atoi` below, to be called
-directly by declaring them as a `cfn` (c-function). The input, and return
-types must be provided.
+### Seamlessly call C (cfn)
+Mylo allows C functions to be called directly by declaring them with `cfn` (c-function).
 ```javascript
-// 'cfn' defines a c function, in this case
-// the standard library atoi. It *must* also
-// have the correct return type, otherwise it
-// will return null
-cfn atoi(x : str) -> f32
+// 'cfn' defines a C function prototype (e.g. from the standard C library)
+cfn atoi(x: str) -> f32
+
 // Prints 7
 print(f"{atoi("7")}")
 ```
 
+#### Automatic Runtime Dynamic Execution
+When running in interpreted mode (`./mylo script.mylo`), Mylo dynamically looks up and binds `cfn` symbols from the running host process or linked libraries at startup.
+- If the symbol is found, it executes immediately in the interpreter without a C compile step.
+- If the symbol is missing, Mylo prints a helpful error indicating the missing symbol along with compilation commands:
+  ```
+  error: native function <name> was not found, either build mylo with these libraries, or provide shared libraries
+  Error: This program contains Native C blocks and no shared objects are found, so it cannot be interpreted.
+  Please compile it to bytecode using: mylo --build script.mylo
+  ```
+
 ### Building a native binary with inline C?
 Here is some Mylo code jumping into C and back. Mylo uses `C() {}` syntax to 
 embed anonymous C function code directly, and it can access variables from
-mylo and return them:
+Mylo and return them:
 ```javascript
-// 1. Explicit return: num
-var result: num = C(val: i32 = 25) -> num {
+// Explicit return: f64
+result: f64 = C(val: i32 = 25) -> f64 {
     double res = sqrt(val);
     printf("Inside C: sqrt(%d) = %f\n", (int)val, res);
     return res;
@@ -189,21 +223,20 @@ print(f"Back in Mylo: Result is {result}")
 
 For more information, read the FFI section of the reference.
 
-We build it by producing a C source file with embedded VM code and wrapper code pre-generated.
+We build it by producing a C source file with embedded VM bytecode and wrapper code pre-generated:
 
 ```shell
 # This produces an out.c file
 > mylo --build example.mylo
 ```
 
-We then just compile it, like any other C file, but we need to include
-the Mylo VM source and headers.
+We then just compile it, like any other C file, including the Mylo VM source and headers:
 ```shell
 # This produces mylo_app
->  gcc out.c src/vm.c src/mylolib.c -o mylo_app -Isrc -lm  
+> gcc out.c src/vm.c src/mylolib.c -o mylo_app -Isrc -lm  
 ```
 
-Our application can then be executed (without a runtime):
+Our application can then be executed natively:
 ```shell
 # Run
 > ./mylo_app
@@ -221,14 +254,13 @@ with CMake. There are [docs here.](cmake/README.md)
 Mylo can be launched in interpreter mode to evaluate commands from the CLI. It can also be used
 to load native dlls and to import other mylo modules.
 
-Launch the Mylo repl with `mylo --repl`. An example can be seen below running in Powershell:
+Launch the Mylo repl with `mylo --repl`. An example can be seen below:
 
 ```powershell
-PS C:\Users\Brad\Documents\mylo-lang\build> .\mylo.exe --repl
-Mylo REPL v0.1.5
+Mylo REPL v0.3.6
 Type 'exit' to quit.
-> var x = range(20, 2, -2)
-> print(x)
-[20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 0, -2]
+> a: i32[] = [0...5]
+> print(a)
+[0, 1, 2, 3, 4, 5]
 > 
 ```

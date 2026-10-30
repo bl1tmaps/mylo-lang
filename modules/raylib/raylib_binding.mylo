@@ -3,55 +3,55 @@ import C "raylib.h"
 mod RL {
 
     struct RGB {
-        var r : byte
-        var g : byte
-        var b : byte
+        r: u8
+        g: u8
+        b: u8
     }
 
     struct Vector2 {
-        var x : num
-        var y : num
+        x: f32
+        y: f32
     }
     
     // Colours
     
-    var RED : RGB = {r=255, g=0, b=0}
-    var GREEN : RGB = {r=0, g=255, b=0}
-    var BLUE : RGB = {r=0, g=0, b=255}
-    var WHITE : RGB = {r=255, g=255, b=255}
-    var YELLOW : RGB = {r=255, g=255, b=0}
-    var CYAN : RGB = {r=0, g=255, b=255}
-    var BLACK : RGB = {r=0, g=0, b=0}
-    var GRAY: RGB =  {r=128, g=128, b= 128}
+    RED: RGB = {r=255, g=0, b=0}
+    GREEN: RGB = {r=0, g=255, b=0}
+    BLUE: RGB = {r=0, g=0, b=255}
+    WHITE: RGB = {r=255, g=255, b=255}
+    YELLOW: RGB = {r=255, g=255, b=0}
+    CYAN: RGB = {r=0, g=255, b=255}
+    BLACK: RGB = {r=0, g=0, b=0}
+    GRAY: RGB = {r=128, g=128, b=128}
 
     cfn InitWindow(x: i32, y: i32, name: str)
     cfn ToggleFullscreen()
     cfn MaximizeWindow()
 
     fn LoadImage(file: str) {
-        var img_id: num = C(file:str=file) -> num {
+        img_id: i32 = C(file: str = file) -> i32 {
             Image raw = LoadImage(file);
             return MYLO_STORE(raw, "Image");
         }
         ret img_id
     }
 
-    fn LoadTextureFromImage(id: num) {
-        var tex_id: num = C(id: num = id) -> num {
+    fn LoadTextureFromImage(id: i32) {
+        tex_id: i32 = C(id: i32 = id) -> i32 {
             Image *img = MYLO_RETRIEVE(id, Image, "Image");
     
             Texture2D tex = LoadTextureFromImage(*(img)); 
             if (img) {
-                return MYLO_STORE(tex,"Texture2D");
+                return MYLO_STORE(tex, "Texture2D");
             }
             return 0;
         }
         ret tex_id
     }
 
-    fn LoadImageFromMemory(filetype: str, file_data: byte[]) {
-        var filesize : i32 = len(file_data)
-        var img_id: num = C(filetype: str = filetype, file_data: byte[] = file_data, filesize: i32 = filesize) -> num {        
+    fn LoadImageFromMemory(filetype: str, file_data: u8[]) {
+        filesize: i32 = len(file_data)
+        img_id: i32 = C(filetype: str = filetype, file_data: u8[] = file_data, filesize: i32 = filesize) -> i32 {        
             Image raw = LoadImageFromMemory(filetype, file_data, filesize);
             return MYLO_STORE(raw, "Image");
         }
@@ -59,15 +59,15 @@ mod RL {
     }
 
     fn LoadRenderTexture(w: i32, h: i32) {
-        var id:num = C(w: i32 = w, h: i32 = h) -> num {
+        id: i32 = C(w: i32 = w, h: i32 = h) -> i32 {
             RenderTexture2D target = LoadRenderTexture(w, h);
             return MYLO_STORE(target, "RenderTexture2D");
         }
         ret id
     }
 
-    fn BeginTextureMode(id: num) {
-        C(id : num = id) {
+    fn BeginTextureMode(id: i32) {
+        C(id: i32 = id) {
             RenderTexture2D *t = MYLO_RETRIEVE(id, RenderTexture2D, "RenderTexture2D");
             BeginTextureMode(*(t));
         }
@@ -75,71 +75,66 @@ mod RL {
     
     cfn EndTextureMode()
     
-    fn RenderTextureFullscreen(id: num, tex_w: i32, tex_h: i32) {
-        C(id : num = id, tex_w: i32 = tex_w, tex_h : i32 = tex_h) {
-            float a = (float)GetScreenWidth()/tex_w;
-            float b = (float)GetScreenHeight()/tex_h;
-            float scale = ((a)<(b)? (a) : (b));
+    fn RenderTextureFullscreen(id: i32, tex_w: i32, tex_h: i32) {
+        C(id: i32 = id, tex_w: i32 = tex_w, tex_h: i32 = tex_h) {
+            float a = (float)GetScreenWidth() / tex_w;
+            float b = (float)GetScreenHeight() / tex_h;
+            float scale = ((a) < (b) ? (a) : (b));
             RenderTexture2D *target = MYLO_RETRIEVE(id, RenderTexture2D, "RenderTexture2D");
             DrawTexturePro(target->texture, (Rectangle){ 0.0f, 0.0f, (float)target->texture.width, (float)-target->texture.height },
-                           (Rectangle){ (GetScreenWidth() - ((float)tex_w*scale))*0.5f, (GetScreenHeight() - ((float)tex_h*scale))*0.5f,
-                           (float)(tex_w)*scale, (float)(tex_h)*scale }, (Vector2){ 0, 0 }, 0.0f, WHITE);
-
+                           (Rectangle){ (GetScreenWidth() - ((float)tex_w * scale)) * 0.5f, (GetScreenHeight() - ((float)tex_h * scale)) * 0.5f,
+                           (float)(tex_w) * scale, (float)(tex_h) * scale }, (Vector2){ 0, 0 }, 0.0f, WHITE);
         }
     }
 
-    fn LoadFontFromMemory(filetype: str, file_data: byte[], font_size: i32) {
-        var filesize : i32 = len(file_data)
-        var font_id: num = C(filetype: str = filetype, file_data: byte[] = file_data, filesize: i32 = filesize, font_size: i32 = font_size) -> num {
+    fn LoadFontFromMemory(filetype: str, file_data: u8[], font_size: i32) {
+        filesize: i32 = len(file_data)
+        font_id: i32 = C(filetype: str = filetype, file_data: u8[] = file_data, filesize: i32 = filesize, font_size: i32 = font_size) -> i32 {
             Font f = LoadFontFromMemory(filetype, file_data, filesize, font_size, NULL, 250);
             return MYLO_STORE(f, "Font");
         }
         ret font_id
     }
     
-    fn DrawTextEx(id: num, text: str, x: num, y: num, size: num, spacing: num, tint: RGB) {
-            C(id:num = id, text: str = text, x:num = x, y:num =y, size: num = size, spacing: num=spacing, rgb: RL_RGB = tint) {                                                                                  
-                Color c = {rgb->r, rgb->g, rgb->b, 255};
-                Font *t = MYLO_RETRIEVE(id, Font, "Font");
-                DrawTextEx(*(t), text, (Vector2){x, y}, size, 0, c); 
-            }
+    fn DrawTextEx(id: i32, text: str, x: f32, y: f32, size: f32, spacing: f32, tint: RGB) {
+        C(id: i32 = id, text: str = text, x: f32 = x, y: f32 = y, size: f32 = size, spacing: f32 = spacing, rgb: RL_RGB = tint) {                                                                                  
+            Color c = {rgb->r, rgb->g, rgb->b, 255};
+            Font *t = MYLO_RETRIEVE(id, Font, "Font");
+            DrawTextEx(*(t), text, (Vector2){x, y}, size, 0, c); 
+        }
     }
     
-    fn DrawTexture(id: num, x: num, y: num, rgb: RGB) {
-        C(id: num = id, x: num = x, y: num = y, rgb: RL_RGB = rgb) {
-            // define our shading colour for draw texture
+    fn DrawTexture(id: i32, x: i32, y: i32, rgb: RGB) {
+        C(id: i32 = id, x: i32 = x, y: i32 = y, rgb: RL_RGB = rgb) {
             Color c = {rgb->r, rgb->g, rgb->b, 255};
-            // Grab our texture
             Texture2D *t = MYLO_RETRIEVE(id, Texture, "Texture2D");
-            
-            // Draw the texture
             DrawTexture(*(t), x, y, c);
         }
     }
 
     fn DrawCircle(x: i32, y: i32, r: i32, col: RGB) {
-        C(r: i32 = r, x:i32 = x, y: i32 = y, rgb: RL_RGB = col) {
+        C(r: i32 = r, x: i32 = x, y: i32 = y, rgb: RL_RGB = col) {
             Color c = {rgb->r, rgb->g, rgb->b, 255};
-            DrawCircle(x, x, r, c);
+            DrawCircle(x, y, r, c);
         }
     }
 
     fn DrawCircleLines(x: i32, y: i32, r: i32, col: RGB) {
-        C(r: i32 = r, x:i32 = x, y: i32 = y, rgb: RL_RGB = col) {
+        C(r: i32 = r, x: i32 = x, y: i32 = y, rgb: RL_RGB = col) {
             Color c = {rgb->r, rgb->g, rgb->b, 255};
-            DrawCircleLines(x, x, r, c);
+            DrawCircleLines(x, y, r, c);
         }
     }
 
     fn DrawRectangle(x: i32, y: i32, w: i32, h: i32, col: RGB) {
-        C(x:i32 = x, y: i32 = y, w:i32 = w, h: i32 = h, rgb: RL_RGB = col) {
+        C(x: i32 = x, y: i32 = y, w: i32 = w, h: i32 = h, rgb: RL_RGB = col) {
             Color c = {rgb->r, rgb->g, rgb->b, 255};
             DrawRectangle(x, y, w, h, c);
         }
     }
     
     fn DrawRectangleRounded(x: i32, y: i32, w: i32, h: i32, roundness: f32, col: RGB) {
-        C(x:i32 = x, y: i32 = y, w:i32 = w, h: i32 = h, roundness: f32 = roundness, rgb: RL_RGB = col) {
+        C(x: i32 = x, y: i32 = y, w: i32 = w, h: i32 = h, roundness: f32 = roundness, rgb: RL_RGB = col) {
             Color c = {rgb->r, rgb->g, rgb->b, 255};
             Rectangle r = {x, y, w, h};
             DrawRectangleRounded(r, roundness, 10, c);
@@ -147,7 +142,7 @@ mod RL {
     }
 
     fn DrawRectangleRoundedLines(x: i32, y: i32, w: i32, h: i32, roundness: f32, col: RGB) {
-        C(x:i32 = x, y: i32 = y, w:i32 = w, h: i32 = h, roundness: f32 = roundness, rgb: RL_RGB = col) {
+        C(x: i32 = x, y: i32 = y, w: i32 = w, h: i32 = h, roundness: f32 = roundness, rgb: RL_RGB = col) {
             Color c = {rgb->r, rgb->g, rgb->b, 255};
             Rectangle r = {x, y, w, h};
             DrawRectangleRoundedLines(r, roundness, 10, c);
@@ -155,35 +150,35 @@ mod RL {
     }
 
     fn DrawRectangleLines(x: i32, y: i32, w: i32, h: i32, col: RGB) {
-        C(x:i32 = x, y: i32 = y, w:i32 = w, h: i32 = h, rgb: RL_RGB = col) { 
+        C(x: i32 = x, y: i32 = y, w: i32 = w, h: i32 = h, rgb: RL_RGB = col) { 
             Color c = {rgb->r, rgb->g, rgb->b, 255};
             DrawRectangleLines(x, y, w, h, c);
         }
     }
 
     fn DrawTriangle(top: Vector2, left: Vector2, right: Vector2, col: RGB) {
-        C(top:RL_Vector2 = top, left:RL_Vector2 = left, right:RL_Vector2 = right, rgb: RL_RGB = col) { 
+        C(top: RL_Vector2 = top, left: RL_Vector2 = left, right: RL_Vector2 = right, rgb: RL_RGB = col) { 
             Color co = {rgb->r, rgb->g, rgb->b, 255};
             Vector2 a = {top->x, top->y};
             Vector2 b = {left->x, left->y};
             Vector2 c = {right->x, right->y};
-            DrawTriangle(a,b,c,co);
+            DrawTriangle(a, b, c, co);
         }
     }
     
     fn DrawTriangleLines(top: Vector2, left: Vector2, right: Vector2, col: RGB) {
-        C(top:RL_Vector2 = top, left:RL_Vector2 = left, right:RL_Vector2 = right, rgb: RL_RGB = col) { 
+        C(top: RL_Vector2 = top, left: RL_Vector2 = left, right: RL_Vector2 = right, rgb: RL_RGB = col) { 
             Color co = {rgb->r, rgb->g, rgb->b, 255};
             Vector2 a = {top->x, top->y};
             Vector2 b = {left->x, left->y};
             Vector2 c = {right->x, right->y};
-            DrawTriangleLines(a,b,c,co);
+            DrawTriangleLines(a, b, c, co);
         }
     }
     
-    cfn WindowShouldClose() -> num
+    cfn WindowShouldClose() -> bool
 
-    fn ClearBackground(col : RGB) {
+    fn ClearBackground(col: RGB) {
         C(rgb: RL_RGB = col) {
             Color co = {rgb->r, rgb->g, rgb->b, 255};
             ClearBackground(co);
@@ -192,6 +187,6 @@ mod RL {
     
     cfn BeginDrawing()
     cfn EndDrawing()
-    cfn DrawFPS(x: num, y: num)
+    cfn DrawFPS(x: i32, y: i32)
 
 }

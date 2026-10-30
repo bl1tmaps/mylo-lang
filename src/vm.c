@@ -2255,8 +2255,16 @@ void* load_library(const char* path) {
 
 void* get_symbol(void* handle, const char* symbol) {
 #ifdef _WIN32
+    if (!handle) handle = GetModuleHandle(NULL);
     return (void*)GetProcAddress((HMODULE)handle, symbol);
 #else
+    if (!handle) {
+#ifdef RTLD_DEFAULT
+        handle = RTLD_DEFAULT;
+#else
+        handle = ((void*)0);
+#endif
+    }
     return dlsym(handle, symbol);
 #endif
 }
