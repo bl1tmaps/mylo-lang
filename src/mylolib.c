@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -30,6 +31,7 @@
 // HTTP Display Includes
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 // #include <winsock2.h> // This was causing a redefinition failure on MSVC
@@ -2480,6 +2482,106 @@ void std_param_filter(VM *vm) {
   vm_push(vm, res_ptr, T_OBJ);
 }
 
+void std_clock(VM *vm) {
+#ifdef _WIN32
+  static LARGE_INTEGER freq;
+  static int init = 0;
+  if (!init) { QueryPerformanceFrequency(&freq); init = 1; }
+  LARGE_INTEGER counter;
+  QueryPerformanceCounter(&counter);
+  double sec = (double)counter.QuadPart / (double)freq.QuadPart;
+  vm_push(vm, sec, T_NUM);
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  double sec = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+  vm_push(vm, sec, T_NUM);
+#endif
+}
+
+void std_abs(VM *vm) {
+  double v = vm_pop(vm);
+  vm_push(vm, fabs(v), T_NUM);
+}
+
+void std_clamp(VM *vm) {
+  double max_val = vm_pop(vm);
+  double min_val = vm_pop(vm);
+  double val = vm_pop(vm);
+  if (val < min_val) val = min_val;
+  if (val > max_val) val = max_val;
+  vm_push(vm, val, T_NUM);
+}
+
+void std_sleep(VM *vm) {
+  double ms = vm_pop(vm);
+#ifdef _WIN32
+  Sleep((DWORD)ms);
+#else
+  usleep((useconds_t)(ms * 1000));
+#endif
+  vm_push(vm, 0, T_NUM);
+}
+
+void std_ord(VM *vm) {
+  double s_val = vm_pop(vm);
+  const char *s = get_str(vm, s_val);
+  double code = (s && s[0]) ? (double)((unsigned char)s[0]) : 0.0;
+  vm_push(vm, code, T_NUM);
+}
+
+void std_chr(VM *vm) {
+  double code_val = vm_pop(vm);
+  char buf[2] = { (char)((unsigned char)code_val), '\0' };
+  int sid = make_string(vm, buf);
+  vm_push(vm, (double)sid, T_STR);
+}
+
+void std_bit_and(VM *vm) {
+  long long b = (long long)vm_pop(vm);
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(a & b), T_NUM);
+}
+
+void std_bit_or(VM *vm) {
+  long long b = (long long)vm_pop(vm);
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(a | b), T_NUM);
+}
+
+void std_bit_xor(VM *vm) {
+  long long b = (long long)vm_pop(vm);
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(a ^ b), T_NUM);
+}
+
+void std_bit_not(VM *vm) {
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(~a), T_NUM);
+}
+
+void std_bit_shl(VM *vm) {
+  long long b = (long long)vm_pop(vm);
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(a << b), T_NUM);
+}
+
+void std_bit_shr(VM *vm) {
+  long long b = (long long)vm_pop(vm);
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(a >> b), T_NUM);
+}
+
+void std_popcount(VM *vm) {
+  unsigned long long a = (unsigned long long)vm_pop(vm);
+  int count = 0;
+  while (a) {
+    count += (a & 1);
+    a >>= 1;
+  }
+  vm_push(vm, (double)count, T_NUM);
+}
+
 const StdLibDef std_library[] = {
     {"type", std_type, "str", 1, {"any"}},
     {"len", std_len, "num", 1, {"any"}},
@@ -2545,4 +2647,17 @@ const StdLibDef std_library[] = {
     {"call", std_call, "any", 2, {"str", "any"}},
     {"filter", std_filter, "arr", 2, {"arr", "str"}},
     {"param_filter", std_param_filter, "arr", 3, {"arr", "str", "any"}},
+    {"clock", std_clock, "num", 0, {NULL}},
+    {"abs", std_abs, "num", 1, {"num"}},
+    {"clamp", std_clamp, "num", 3, {"num", "num", "num"}},
+    {"sleep", std_sleep, "void", 1, {"num"}},
+    {"ord", std_ord, "num", 1, {"str"}},
+    {"chr", std_chr, "str", 1, {"num"}},
+    {"bit_and", std_bit_and, "num", 2, {"num", "num"}},
+    {"bit_or", std_bit_or, "num", 2, {"num", "num"}},
+    {"bit_xor", std_bit_xor, "num", 2, {"num", "num"}},
+    {"bit_not", std_bit_not, "num", 1, {"num"}},
+    {"bit_shl", std_bit_shl, "num", 2, {"num", "num"}},
+    {"bit_shr", std_bit_shr, "num", 2, {"num", "num"}},
+    {"popcount", std_popcount, "num", 1, {"num"}},
     {NULL, NULL, NULL, 0, {NULL}}};

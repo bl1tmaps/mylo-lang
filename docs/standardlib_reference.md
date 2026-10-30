@@ -1,96 +1,119 @@
 <!-- TOC --><a name="mylo-standard-library-documentation"></a>
 # Mylo Standard Library Documentation
 
-The Mylo Standard Library provides essential functions for file I/O, math, and data manipulation. These functions are built-in and available directly in the interpreter.
+The Mylo Standard Library provides essential built-in functions for file I/O, math, bit manipulation, string operations, data collections, multithreading, and visual web output. All types are strictly annotated and variable declarations require explicit typing (`name: type = value`).
 
-<!-- TOC start (generated with https://github.com/derlin/bitdowntoc) -->
+## Table of Contents
 
 - [Mylo Standard Library Documentation](#mylo-standard-library-documentation)
   * [Math Functions](#math-functions)
-    + [`sqrt(value: num) -> num`](#sqrtvalue-num-num)
-    + [`sin(value: num) -> num`](#sinangle-num---num)
-    + [`cos(value: num) -> num`](#cosangle-num---num) 
-    + [`tan(value: num) -> num`](#tanangle-num---num)
-    + [`floor(value: num) -> num`](#floorvalue-num---num)
-    + [`ceil(value: num) -> num`](#ceilvalue-num---num)
-    + [`mix(start: num, stop: num, weight: num) -> num`](#mixstart-num-stop-num-weight-num---num)
-    + [`min(val1: num, val2:num) -> num`](#minval1-num-val2-num---num)
-    + [`max(val1: num, val2:num) -> num`](#maxval1-num-val2-num---num)
-    + [`distance(x1: num, y1: num, x2: num, y2: num) -> num`](#distancex1-num-y1-num-x2-num-y2-num---num)
-    + [`seed() -> None (Random Number Functions)`](#random_numbers)
-    + [` noise(x: num, y: num, z: num) -> num`](#noisex-num-y-num-z-num---num)
-  * [Utility Functions](#utility-functions)
-    + [`type(value: any) -> str`](#type-any)
-    + [`len(collection: any) -> num`](#lencollection-any-num)
-    + [`contains(haystack: any, needle: any) -> num`](#containshaystack-any-needle-any-num)
-    + [`list(size: num) -> arr`](#listsize-num---arr)
-    + [`add(array: arr, index: num, value: any) -> arr`](#addarray-arr-index-num-value-any---arr)
-    + [`remove(collection: any, key: any) -> obj`](#removecollection-any-key-any---obj)
-    + [`where(collection: any, item: any) -> num`](#wherecollectionany-itemany-num)
-    + [`filter(array: arr, func_name: str) -> arr`](#filter-arr)
-    + [`param_filter(array: arr, func_name: str, param: any) -> arr`](#param-filter)
-    + [`range(start: num, step: num, stop: num) -> arr`](#array-range)
-    + [`split(source: str, delimiter: str) -> arr`](#splitsourcestr-delimiterstr-arr)
-    + [`for_list(func_name: str, list: arr) -> arr`](#for-list-arr)
-    + [`min_list(list: arr) -> num`](#min_listlist-arr---num)
-    + [`max_list(list: arr) -> num`](#max_listlist-arr---num)
-  * [Type Conversion](#type-conversion)
-    + [`to_string(value: any) -> str`](#to_string)
-    + [`to_num(value: any) -> num`](#to_num)
-  * [File I/O (Text)](#file-io-text)
-    + [`read_lines(path: str) -> arr`](#read_linespath-str-arr)
-    + [`write_file(path: str, content: str, mode: str) -> num`](#write_filepath-str-content-str-mode-str-num)
-  * [File I/O (Binary)](#file-io-binary)
-    + [`read_bytes(path: str, stride: num) -> arr`](#read_bytespath-str-stride-num-arr)
-    + [`write_bytes(path: str, data: arr) -> num`](#write_bytespath-str-data-arr-num)
-  * [OS System & Process Management](#systemcommand-str---arr)
+    + [`sqrt(value: f64) -> f64`](#sqrtvalue-f64---f64)
+    + [`sin(angle: f64) -> f64`](#sinangle-f64---f64)
+    + [`cos(angle: f64) -> f64`](#cosangle-f64---f64)
+    + [`tan(angle: f64) -> f64`](#tanangle-f64---f64)
+    + [`floor(value: f64) -> f64`](#floorvalue-f64---f64)
+    + [`ceil(value: f64) -> f64`](#ceilvalue-f64---f64)
+    + [`abs(value: f64) -> f64`](#absvalue-f64---f64)
+    + [`clamp(value: f64, min: f64, max: f64) -> f64`](#clampvalue-f64-min-f64-max-f64---f64)
+    + [`mix(start: f64, stop: f64, weight: f64) -> f64`](#mixstart-f64-stop-f64-weight-f64---f64)
+    + [`min(val1: f64, val2: f64) -> f64`](#minval1-f64-val2-f64---f64)
+    + [`max(val1: f64, val2: f64) -> f64`](#maxval1-f64-val2-f64---f64)
+    + [`distance(x1: f64, y1: f64, x2: f64, y2: f64) -> f64`](#distancex1-f64-y1-f64-x2-f64-y2-f64---f64)
+    + [`seed(val: f64) -> void`](#seedval-f64---void)
+    + [`rand() -> f64`](#rand---f64)
+    + [`rand_normal() -> f64`](#rand_normal---f64)
+    + [`noise(x: f64, y: f64, z: f64) -> f64`](#noisex-f64-y-f64-z-f64---f64)
+  * [Bitwise Operations](#bitwise-operations)
+    + [`bit_and(a: i64, b: i64) -> i64`](#bit_anda-i64-b-i64---i64)
+    + [`bit_or(a: i64, b: i64) -> i64`](#bit_ora-i64-b-i64---i64)
+    + [`bit_xor(a: i64, b: i64) -> i64`](#bit_xora-i64-b-i64---i64)
+    + [`bit_not(a: i64) -> i64`](#bit_nota-i64---i64)
+    + [`bit_shl(a: i64, b: i64) -> i64`](#bit_shla-i64-b-i64---i64)
+    + [`bit_shr(a: i64, b: i64) -> i64`](#bit_shra-i64-b-i64---i64)
+    + [`popcount(a: i64) -> i32`](#popcounta-i64---i32)
+  * [String Operations & Inspection](#string-operations--inspection)
+    + [String Indexing (`str[i]`) and Slicing (`str[start:end]`)](#string-indexing-and-slicing)
+    + [`len(collection: any) -> i32`](#lencollection-any---i32)
+    + [`ord(s: string) -> i32`](#ords-string---i32)
+    + [`chr(code: i32) -> string`](#chrcode-i32---string)
+    + [`split(source: string, delimiter: string) -> string[]`](#splitsource-string-delimiter-string---string)
+    + [`contains(haystack: any, needle: any) -> i32`](#containshaystack-any-needle-any---i32)
+    + [`where(collection: any, item: any) -> i32`](#wherecollection-any-item-any---i32)
+  * [Collections & Array Manipulation](#collections--array-manipulation)
+    + [`list(size: i32) -> any[]`](#listsize-i32---any)
+    + [`range(start: f64, step: f64, stop: f64) -> f64[]`](#rangestart-f64-step-f64-stop-f64---f64)
+    + [`add(array: any[], index: i32, value: any) -> any[]`](#addarray-any-index-i32-value-any---any)
+    + [`remove(collection: any, key: any) -> void`](#removecollection-any-key-any---void)
+    + [`min_list(list: f64[]) -> f64`](#min_listlist-f64---f64)
+    + [`max_list(list: f64[]) -> f64`](#max_listlist-f64---f64)
+    + [`for_list(func_name: string, list: any[]) -> any[]`](#for_listfunc_name-string-list-any---any)
+    + [`filter(array: any[], func_name: string) -> any[]`](#filterarray-any-func_name-string---any)
+    + [`param_filter(array: any[], func_name: string, param: any) -> any[]`](#param_filterarray-any-func_name-string-param-any---any)
+    + [`copy(value: any) -> any`](#copyvalue-any---any)
+  * [Type Inspection & Conversion](#type-inspection--conversion)
+    + [`type(value: any) -> string`](#typevalue-any---string)
+    + [`to_string(value: any) -> string`](#to_stringvalue-any---string)
+    + [`to_num(value: any) -> f64`](#to_numvalue-any---f64)
+  * [Time & Timing](#time--timing)
+    + [`clock() -> f64`](#clock---f64)
+    + [`sleep(ms: i32) -> void`](#sleepms-i32---void)
+  * [File I/O (Text & Binary)](#file-io-text--binary)
+    + [`read_lines(path: string) -> string[]`](#read_linespath-string---string)
+    + [`write_file(path: string, content: string, mode: string) -> i32`](#write_filepath-string-content-string-mode-string---i32)
+    + [`read_bytes(path: string, stride: i32) -> i32[]`](#read_bytespath-string-stride-i32---i32)
+    + [`write_bytes(path: string, data: i32[]) -> i32`](#write_bytespath-string-data-i32---i32)
+    + [`list_dir(path: string, filter: string) -> string[]`](#list_dirpath-string-filter-string---string)
+  * [OS System & Process Management](#os-system--process-management)
+    + [`system(command: string) -> string[]`](#systemcommand-string---string)
+    + [`system_thread(command: string, name: string) -> i32`](#system_threadcommand-string-name-string---i32)
+    + [`get_job(name: string) -> any`](#get_jobname-string---any)
   * [Terminal Input](#terminal-input)
-    + [`get_keys() -> arr`](#get_keys---arr)
-    + [`kbhit() -> num`](#kbhit---num)
-    + [`cget(blocking: num) -> str`](#cgetblocking-num---str)
-  * [Multithreading](#multithreading)
-    + [`create_worker(region: region, function_name: str) -> num`](#create_workerregion-region-function_name-str---num)
-    + [`check_worker(worker_id: num) -> num`](#check_workerworker_id-num---num)
-    + [`dock_worker(worker_id: num) -> void`](#dock_workerworker_id-num---void)
-  * [Universal Bus](#universal-bus)
-    + [`bus_get(key: str) -> any`](#bus_getkey-str---any)
-    + [`bus_set(key: str, value: any) -> any`](#bus_setkey-str-value-any---num)
-  * [Web Visual Library](#mylo-web-visual-library)
-    + [`web_init() -> any`](#web_init---any)
-    + [`web_status(wait: num) -> num`](#web_statuswait-num---num)
-    + [`web_clr() -> any`](#web_clr---any)
-  * [Web Primitives](#drawing-primitives)
-    + [`web_rect(x: num, y: num, w: num, h: num, color: str) -> any`](#web_rectx-num-y-num-w-num-h-num-color-str---any)
-    + [`web_circle(x: num, y: num, r: num, color: str) -> any`](#web_circlex-num-y-num-r-num-color-str---any)
-    + [`web_line(x1: num, y1: num, x2: num, y2: num, thickness: num, color: str) -> any`](#web_linex1-num-y1-num-x2-num-y2-num-thickness-num-color-str---any)
-    + [`web_text(text: str, x: num, y: num, size: num) -> any`](#web_texttext-str-x-num-y-num-size-num---any)
-  * [Metaprogramming and Function Calls](#)
+    + [`cget(blocking: i32) -> string`](#cgetblocking-i32---string)
+    + [`kbhit() -> i32`](#kbhit---i32)
+    + [`get_keys() -> string[]`](#get_keys---string)
+  * [Multithreading & Universal Bus](#multithreading--universal-bus)
+    + [`create_worker(function_name: string) -> i32`](#create_workerfunction_name-string---i32)
+    + [`check_worker(worker_id: i32) -> i32`](#check_workerworker_id-i32---i32)
+    + [`dock_worker(worker_id: i32) -> void`](#dock_workerworker_id-i32---void)
+    + [`bus_set(key: string, value: any) -> i32`](#bus_setkey-string-value-any---i32)
+    + [`bus_get(key: string) -> any`](#bus_getkey-string---any)
+  * [Web Visual Library](#web-visual-library)
+    + [`web_init() -> void`](#web_init---void)
+    + [`web_status(wait: i32) -> i32`](#web_statuswait-i32---i32)
+    + [`web_clr() -> void`](#web_clr---void)
+    + [`web_rect(x: f64, y: f64, w: f64, h: f64, color: string) -> void`](#web_rectx-f64-y-f64-w-f64-h-f64-color-string---void)
+    + [`web_circle(x: f64, y: f64, r: f64, color: string) -> void`](#web_circlex-f64-y-f64-r-f64-color-string---void)
+    + [`web_line(x1: f64, y1: f64, x2: f64, y2: f64, thickness: f64, color: string) -> void`](#web_linex1-f64-y1-f64-x2-f64-y2-f64-thickness-f64-color-string---void)
+    + [`web_triangle(x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64, color: string) -> void`](#web_trianglex1-f64-y1-f64-x2-f64-y2-f64-x3-f64-y3-f64-color-string---void)
+    + [`web_text(text: string, x: f64, y: f64, size: f64) -> void`](#web_texttext-string-x-f64-y-f64-size-f64---void)
+  * [Metaprogramming](#metaprogramming)
+    + [`call(name: string, args: any[]) -> any`](#callname-string-args-any---any)
 
+---
 
-<!-- TOC end -->
-
-<!-- TOC --><a name="math-functions"></a>
 ## Math Functions
 
-<!-- TOC --><a name="sqrtvalue-num-num"></a>
-### `sqrt(value: num) -> num`
+<a name="sqrtvalue-f64---f64"></a>
+### `sqrt(value: f64) -> f64`
 
-Calculates the square root of a number.
+Calculates the square root of a floating-point number.
 
 **Arguments:**
 * `value`: The number to calculate the square root of.
 
 **Returns:**
-* The square root as a number.
+* The square root as an `f64`.
 
 **Example:**
 ```javascript
-var result = sqrt(16)
+result: f64 = sqrt(16.0)
 print(result) // 4
 ```
 
-<a name="sinangle-num-num"></a>
-### `sin(angle: num) -> num`
+---
+
+<a name="sinangle-f64---f64"></a>
+### `sin(angle: f64) -> f64`
 
 Calculates the sine of an angle (in radians).
 
@@ -98,10 +121,12 @@ Calculates the sine of an angle (in radians).
 * `angle`: The angle in radians.
 
 **Returns:**
-* The sine of the angle.
+* The sine of the angle as an `f64`.
 
-<a name="cosangle-num-num"></a>
-### `cos(angle: num) -> num`
+---
+
+<a name="cosangle-f64---f64"></a>
+### `cos(angle: f64) -> f64`
 
 Calculates the cosine of an angle (in radians).
 
@@ -109,10 +134,12 @@ Calculates the cosine of an angle (in radians).
 * `angle`: The angle in radians.
 
 **Returns:**
-* The cosine of the angle.
+* The cosine of the angle as an `f64`.
 
-<a name="tanangle-num-num"></a>
-### `tan(angle: num) -> num`
+---
+
+<a name="tanangle-f64---f64"></a>
+### `tan(angle: f64) -> f64`
 
 Calculates the tangent of an angle (in radians).
 
@@ -120,1028 +147,745 @@ Calculates the tangent of an angle (in radians).
 * `angle`: The angle in radians.
 
 **Returns:**
-* The tangent of the angle.
+* The tangent of the angle as an `f64`.
 
-<a name="floorvalue-num-num"></a>
-### `floor(value: num) -> num`
+---
 
-Rounds a number down to the nearest integer.
+<a name="floorvalue-f64---f64"></a>
+### `floor(value: f64) -> f64`
 
-**Arguments:**
-* `value`: The number to round.
-
-**Returns:**
-* The largest integer less than or equal to the given number.
-
-<a name="ceilvalue-num-num"></a>
-### `ceil(value: num) -> num`
-
-Rounds a number up to the nearest integer.
+Rounds a floating-point number down to the nearest integer value.
 
 **Arguments:**
 * `value`: The number to round.
 
 **Returns:**
-* The smallest integer greater than or equal to the given number.
+* The largest integer less than or equal to `value` as an `f64`.
 
-<a name="mixstart-stop-weight-num"></a>
-### `mix(start: num, stop: num, weight: num) -> num`
+---
 
-Linearly interpolates between two values based on a weight.
+<a name="ceilvalue-f64---f64"></a>
+### `ceil(value: f64) -> f64`
+
+Rounds a floating-point number up to the nearest integer value.
 
 **Arguments:**
-* `start`: The starting value (returned when weight is 0).
-* `stop`: The ending value (returned when weight is 1).
-* `weight`: The interpolation factor (usually between 0.0 and 1.0).
+* `value`: The number to round.
 
 **Returns:**
-* The interpolated number.
+* The smallest integer greater than or equal to `value` as an `f64`.
 
-<a name="minval1-val2-num"></a>
-### `min(val1: num, val2: num) -> num`
+---
+
+<a name="absvalue-f64---f64"></a>
+### `abs(value: f64) -> f64`
+
+Returns the absolute value of a number.
+
+**Arguments:**
+* `value`: The numeric value.
+
+**Returns:**
+* Absolute value as an `f64`.
+
+**Example:**
+```javascript
+diff: f64 = abs(-42.5)
+print(diff) // 42.5
+```
+
+---
+
+<a name="clampvalue-f64-min-f64-max-f64---f64"></a>
+### `clamp(value: f64, min: f64, max: f64) -> f64`
+
+Clamps a value to lie within the specified closed range `[min, max]`.
+
+**Arguments:**
+* `value`: The input value.
+* `min`: The lower bound.
+* `max`: The upper bound.
+
+**Returns:**
+* Clamped value as an `f64`.
+
+**Example:**
+```javascript
+v: f64 = clamp(15.0, 0.0, 10.0)
+print(v) // 10.0
+```
+
+---
+
+<a name="mixstart-f64-stop-f64-weight-f64---f64"></a>
+### `mix(start: f64, stop: f64, weight: f64) -> f64`
+
+Linearly interpolates between two values based on a weighting factor: `start + (stop - start) * weight`.
+
+**Arguments:**
+* `start`: The starting value.
+* `stop`: The ending value.
+* `weight`: The interpolation factor (typically between 0.0 and 1.0).
+
+**Returns:**
+* The interpolated `f64`.
+
+---
+
+<a name="minval1-f64-val2-f64---f64"></a>
+### `min(val1: f64, val2: f64) -> f64`
 
 Returns the smaller of two numbers.
 
-**Arguments:**
-* `val1`: The first number.
-* `val2`: The second number.
+---
 
-**Returns:**
-* The minimum value.
-
-<a name="maxval1-val2-num"></a>
-### `max(val1: num, val2: num) -> num`
+<a name="maxval1-f64-val2-f64---f64"></a>
+### `max(val1: f64, val2: f64) -> f64`
 
 Returns the larger of two numbers.
 
-**Arguments:**
-* `val1`: The first number.
-* `val2`: The second number.
+---
 
-**Returns:**
-* The maximum value.
+<a name="distancex1-f64-y1-f64-x2-f64-y2-f64---f64"></a>
+### `distance(x1: f64, y1: f64, x2: f64, y2: f64) -> f64`
 
-<a name="distancex1-y1-x2-y2-num"></a>
-### `distance(x1: num, y1: num, x2: num, y2: num) -> num`
+Calculates the Euclidean distance between two 2D points: `sqrt((x2 - x1)^2 + (y2 - y1)^2)`.
 
-Calculates the Euclidean distance between two 2D points.
+---
 
-**Arguments:**
-* `x1`: The X coordinate of the first point.
-* `y1`: The Y coordinate of the first point.
-* `x2`: The X coordinate of the second point.
-* `y2`: The Y coordinate of the second point.
+<a name="seedval-f64---void"></a>
+### `seed(val: f64) -> void`
 
-**Returns:**
-* The distance between the points.
+Initializes the pseudo-random number generator with a specific seed value.
 
+---
 
-<!-- TOC --><a name="random_numbers"></a>
-### `seed(val: num) -> None`
-Initializes the random number generator with a specific seed value.
+<a name="rand---f64"></a>
+### `rand() -> f64`
 
-### `rand() -> num`
-Generates a uniform random number between `0.0` and `1.0` (inclusive).
+Generates a uniform pseudo-random number in the range `[0.0, 1.0]`.
 
 **Example:**
 ```javascript
-seed(1234)
-var r = rand() // e.g. 0.832...
+seed(1234.0)
+r: f64 = rand()
 ```
 
-### `rand_normal() -> num`
-Generates a random number following a Standard Normal Distribution (Gaussian) with a Mean of `0.0` and a Standard Deviation of `1.0`.
+---
 
-**Behavior:**
-* **Distribution:** Uses the Box-Muller transform.
-* **Range:** While theoretically unbounded, ~68% of values fall between `-1.0` and `1.0`, and ~99.7% fall between `-3.0` and `3.0`.
+<a name="rand_normal---f64"></a>
+### `rand_normal() -> f64`
 
-**Example:**
-```javascript
-// Generate a value, likely close to 0
-var n = rand_normal() 
-```
+Generates a random number following a Standard Normal Distribution (Gaussian) with mean `0.0` and standard deviation `1.0` using the Box-Muller transform.
 
-<a name="noisex-y-z-num"></a>
-### `noise(x: num, y: num, z: num) -> num`
+---
+
+<a name="noisex-f64-y-f64-z-f64---f64"></a>
+### `noise(x: f64, y: f64, z: f64) -> f64`
 
 Calculates 3D Perlin Noise for the given coordinates.
 
 **Arguments:**
 * `x`: The X coordinate.
 * `y`: The Y coordinate.
-* `z`: The Z coordinate (use `0.0` for 2D noise).
+* `z`: The Z coordinate (pass `0.0` for 2D noise).
 
 **Returns:**
-* A smooth random number roughly between `-1.0` and `1.0`.
+* A smooth noise value roughly between `-1.0` and `1.0`.
+
+---
+
+## Bitwise Operations
+
+All bitwise operations operate on 64-bit signed/unsigned integer values (`i64` / `u64`).
+
+<a name="bit_anda-i64-b-i64---i64"></a>
+### `bit_and(a: i64, b: i64) -> i64`
+
+Performs bitwise AND (`a & b`).
 
 **Example:**
 ```javascript
-// 2D Noise sample
-var val = noise(x * 0.1, y * 0.1, 0)
-
-// Animated Noise
-var t = 0
-// Loop...
-var val = noise(x * 0.1, y * 0.1, t)
-t = t + 0.01
+mask: i64 = bit_and(0x0F, 0xFF)
+print(mask) // 15
 ```
 
-<!-- TOC --><a name="utility-functions"></a>
-## Utility Functions
+---
 
-<!-- TOC --><a name="type-any"></a>
-### `type(x: any) -> str`
+<a name="bit_ora-i64-b-i64---i64"></a>
+### `bit_or(a: i64, b: i64) -> i64`
 
-Returns the string describing the type
+Performs bitwise OR (`a | b`).
 
-**Arguments:**
-* `x`: The variable to be checked
+---
 
-**Returns:**
-* Type as string: num, str, name (if enum), list, map, bytes, i32[], f32[], i16[], i64[], bool[], struct, null
+<a name="bit_xora-i64-b-i64---i64"></a>
+### `bit_xor(a: i64, b: i64) -> i64`
+
+Performs bitwise XOR (`a ^ b`).
+
+---
+
+<a name="bit_nota-i64---i64"></a>
+### `bit_not(a: i64) -> i64`
+
+Performs bitwise NOT (`~a`).
+
+---
+
+<a name="bit_shla-i64-b-i64---i64"></a>
+### `bit_shl(a: i64, b: i64) -> i64`
+
+Performs bitwise left shift (`a << b`).
+
+---
+
+<a name="bit_shra-i64-b-i64---i64"></a>
+### `bit_shr(a: i64, b: i64) -> i64`
+
+Performs bitwise right shift (`a >> b`).
+
+---
+
+<a name="popcounta-i64---i32"></a>
+### `popcount(a: i64) -> i32`
+
+Counts the number of set (1) bits in an integer (population count / Hamming weight).
 
 **Example:**
 ```javascript
-var x = "Hi"
-print(type(x)) // "str"
-
-var s = 99
-print(type(s)) // "num"
+bits: i32 = popcount(7)
+print(bits) // 3
 ```
 
-<!-- TOC --><a name="lencollection-any-num"></a>
-### `len(collection: any) -> num`
+---
+
+## String Operations & Inspection
+
+<a name="string-indexing-and-slicing"></a>
+### String Indexing and Slicing
+
+Strings in Mylo support 0-based indexing and slice ranges:
+
+* `s[i]`: Retrieves a 1-character substring containing the byte at index `i`.
+* `s[start:end]`: Retrieves the substring from `start` up to (exclusive) `end`.
+* `len(s)`: Returns the total number of bytes in string `s`.
+
+**Example:**
+```javascript
+text: string = "Hello, Mylo!"
+first_char: string = text[0]        // "H"
+sub: string = text[7:11]             // "Mylo"
+length: i32 = len(text)             // 12
+```
+
+---
+
+<a name="lencollection-any---i32"></a>
+### `len(collection: any) -> i32`
 
 Returns the number of elements in an array or the number of characters in a string.
 
 **Arguments:**
-* `collection`: The array or string to check.
+* `collection`: The array or string.
 
 **Returns:**
-* The length as a number.
+* Length as an integer.
 
-**Example:**
-```javascript
-var list = ["A", "B", "C"]
-print(len(list)) // 3
+---
 
-var s = "Hello"
-print(len(s)) // 5
-```
+<a name="ords-string---i32"></a>
+### `ord(s: string) -> i32`
 
-<!-- TOC --><a name="containshaystack-any-needle-any-num"></a>
-### `contains(haystack: any, needle: any) -> num`
-
-Checks if a value exists within a collection.
+Returns the ASCII / byte code value of the first character of the string `s`.
 
 **Arguments:**
-* `haystack`: The collection (Array or String) to search in.
-* `needle`: The value to search for.
-  * If `haystack` is an **Array**, `needle` can be any type.
-  * If `haystack` is a **String**, `needle` must be a substring.
+* `s`: The input string.
 
 **Returns:**
-* `1` if found, `0` if not found.
+* ASCII numeric code (0 to 255), or 0 if string is empty.
 
 **Example:**
 ```javascript
-// Array Check
-var list = ["apple", "banana", "cherry"]
-if (contains(list, "banana")) {
-    print("Found banana!")
+code: i32 = ord("A")
+print(code) // 65
+```
+
+---
+
+<a name="chrcode-i32---string"></a>
+### `chr(code: i32) -> string`
+
+Converts an ASCII / byte value (0 to 255) into a 1-character string.
+
+**Example:**
+```javascript
+letter: string = chr(65)
+print(letter) // "A"
+```
+
+---
+
+<a name="splitsource-string-delimiter-string---string"></a>
+### `split(source: string, delimiter: string) -> string[]`
+
+Splits a string into an array of substrings based on a delimiter. If `delimiter` is empty `""`, splits into individual 1-character strings.
+
+**Example:**
+```javascript
+s: string = "red,green,blue"
+parts: string[] = split(s, ",")
+print(parts[0]) // "red"
+```
+
+---
+
+<a name="containshaystack-any-needle-any---i32"></a>
+### `contains(haystack: any, needle: any) -> i32`
+
+Checks if a value exists within an array or if a substring exists within a string.
+
+**Returns:**
+* `1` if found, `0` otherwise.
+
+**Example:**
+```javascript
+fruits: string[] = ["apple", "banana", "cherry"]
+if (contains(fruits, "banana")) {
+    print("Found banana")
 }
-
-// String Check
-if (contains("Teamwork", "work")) {
-    print("Found substring!")
-}
 ```
 
-<a name="splitsourcestr-delimiterstr-arr"></a>
-### `split(source: str, delimiter: str) -> arr`
+---
 
-Splits a string into an array of substrings based on a delimiter.
+<a name="wherecollection-any-item-any---i32"></a>
+### `where(collection: any, item: any) -> i32`
 
-**Arguments:**
-* `source`: The string to split.
-* `delimiter`: The string pattern to split by. If empty `""`, splits into individual characters.
+Finds the 0-based index of the first occurrence of an item within an array or string.
 
 **Returns:**
-* An array of strings.
+* 0-based index if found, or `-1` if not found.
+
+---
+
+## Collections & Array Manipulation
+
+<a name="listsize-i32---any"></a>
+### `list(size: i32) -> any[]`
+
+Creates a new array of a specific size, initialized with zero elements.
 
 **Example:**
 ```javascript
-var s = "a,b,c"
-var parts = split(s, ",")
-print(parts[0]) // "a"
-print(parts[1]) // "b"
-
-var word = "cat"
-for (x in split(word, "")) {
-	print(x)
-}
-// ["c", "a", "t"]
-```
-
-
-<a name="wherecollectionany-itemany-num"></a>
-### `where(collection: any, item: any) -> num`
-
-Finds the index of the first occurrence of an item within a collection.
-
-**Arguments:**
-* `collection`: The string or array to search.
-* `item`: The value to search for.
-
-**Returns:**
-* The index (0-based) of the found item, or `-1` if not found.
-
-**Example:**
-```javascript
-// Arrays
-var list = ["cat", "dog"]
-print(where(list, "dog")) // 1
-print(where(list, "fish")) // -1
-
-// Strings
-var text = "ohblast"
-print(where(text, "blast")) // 2
-```
-<a name="filter-arr"></a>
-### `filter(array: arr, func_name: str) -> arr`
-
-Applies a function with name func_name to the array, and returns a list
-or elements where the func evaluated to true. See example
-
-**Arguments:**
-* `array`: The array to filter
-* `func_name`: The function to apply
-
-**Returns:**
-* arr, the filtered array
-
-**Example:**
-```javascript
-var L = [1, 2, 3]
-fn filt(x) { ret x > 1 }
-var o = filter(L, "filt")
-print(o) // [2, 3]
-```
-<a name="param-filter"></a>
-### `param_filter(array: arr, func_name: str, param : any) -> arr`
-
-Applies a function with name func_name to the array, and returns a list
-or elements where the func evaluated to true. Allows an additional parameter
-
-**Arguments:**
-* `array`: The array to filter
-* `func_name`: The function to apply
-* `param` : The additional filter parameter
-
-**Returns:**
-* arr, the filtered array
-
-**Example:**
-```javascript
-var x = [{"ID"=5, "VAL"=9}, {"ID"=9, "VAL"=5}]
-fn filt(x, y) {ret x["ID"] == y}
-var o = param_filter(x, "filt", 5)
-// {"ID"=5, "VAL"=9}
-```
-
-
-<a name="list_minlist-arr-num"></a>
-### `min_list(list: arr) -> num`
-
-Finds the smallest numeric value within a list.
-
-**Arguments:**
-* `list`: The array to search. Must not be empty.
-
-**Returns:**
-* The minimum number found in the list.
-
-<a name="list_maxlist-arr-num"></a>
-### `max_list(list: arr) -> num`
-
-Finds the largest numeric value within a list.
-
-**Arguments:**
-* `list`: The array to search. Must not be empty.
-
-**Returns:**
-* The maximum number found in the list.
-
-**Example:**
-```javascript
-var nums = [10, 5, 20, 2]
-print(min_list(nums)) // 2
-print(max_list(nums)) // 20
-```
-
-<a name="listsize-num-arr"></a>
-### `list(size: num) -> arr`
-
-Creates a new array of a specific size, initialized with zeros.
-
-**Arguments:**
-* `size`: The number of elements to allocate.
-
-**Returns:**
-* A new array containing `size` zeros.
-
-**Example:**
-```javascript
-var buffer = list(10)
+buffer: i32[] = list(10)
 print(len(buffer)) // 10
-print(buffer[0])   // 0
-```
-<a name="array-range"></a>
-### `range(start: num, step: num, stop: num) -> arr`
-
-Generates an array of numbers from `start` to `stop` (inclusive), incrementing by `step`.
-
-**Arguments:**
-* `start`: The starting number of the sequence.
-* `step`: The amount to increment (or decrement) by in each step. Must not be 0.
-* `stop`: The final number of the sequence.
-
-**Behavior:**
-* **Inclusive:** The returned array includes the `stop` value if the step lands exactly on it.
-* **Auto-Direction:** The function automatically determines whether to increment or decrement based on `start` and `stop`. The sign of `step` is ignored (the absolute value is used).
-    * If `start < stop`: Values increase.
-    * If `start > stop`: Values decrease.
-* **Floats:** Supports floating point numbers.
-
-**Examples:**
-
-```javascript
-// Basic Integer Range
-var r1 = range(0, 2, 10)
-// Result: [0, 2, 4, 6, 8, 10]
-
-// Floating Point Range
-var r2 = range(0, 0.5, 1.5)
-// Result: [0.0, 0.5, 1.0, 1.5]
-
-// Reverse Range
-var r3 = range(10, 2, 0)
-// Result: [10, 8, 6, 4, 2, 0]
-
-// Decimal Reverse
-var r4 = range(1, 0.1, 0)
-// Result: [1.0, 0.9, 0.8, ... 0.0]
 ```
 
-<a name="addarray-arr-index-num-value-any-arr"></a>
-### `add(array: arr, index: num, value: any) -> arr`
+---
 
-Inserts a value into an array at a specific index, shifting subsequent elements to the right.
+<a name="rangestart-f64-step-f64-stop-f64---f64"></a>
+### `range(start: f64, step: f64, stop: f64) -> f64[]`
 
-**Important:** Arrays in Mylo are fixed-size in memory. This function creates and returns a **new** array. You must assign the result back to your variable to see the change.
-
-**Arguments:**
-* `array`: The source array.
-* `index`: The position to insert the value (0 to len).
-* `value`: The value to insert.
-
-**Returns:**
-* A **new** array with the element added.
+Generates an array of numbers from `start` to `stop` (inclusive), incrementing or decrementing by `step`.
 
 **Example:**
 ```javascript
-var weights = [10, 20]
-// Insert 15 at index 1
-weights = add(weights, 1, 15) 
-print(weights) // [10, 15, 20]
+r: f64[] = range(0.0, 2.0, 10.0) // [0, 2, 4, 6, 8, 10]
 ```
 
-<a name="removecollection-any-key-any-obj"></a>
-### `remove(collection: any, key: any) -> obj`
+---
 
-Removes an element from a collection **in-place**.
+<a name="addarray-any-index-i32-value-any---any"></a>
+### `add(array: any[], index: i32, value: any) -> any[]`
 
-**Arguments:**
-* `collection`: The array or map to modify.
-* `key`: The identifier for the item to remove.
-  * **Array**: The numeric **index** of the item. Elements after this index are shifted left.
-  * **Map**: The **key** (string) of the entry to remove.
-
-**Returns:**
-* Returns the modified collection to support chaining (e.g., `remove(arr, 0)`).
+Inserts a value into an array at a specific index, shifting subsequent elements to the right. Returns a **new** array.
 
 **Example:**
 ```javascript
-// Array Removal
-var items = ["A", "B", "C"]
-remove(items, 1) // Remove index 1 ("B")
-print(items) // ["A", "C"]
-
-// Map Removal
-var data = {"name"="Mylo", "ver"=1}
-remove(data, "ver")
-print(data) // {"name"="Mylo"}
+weights: i32[] = [10, 20]
+weights = add(weights, 1, 15) // [10, 15, 20]
 ```
 
-<a name="for-list-arr"></a>
-### `for_list(func_name: str, list: arr) -> arr`
+---
 
-Creates a new array by applying a specified function to every element in the provided list. This is similar to a `map` function in other languages.
+<a name="removecollection-any-key-any---void"></a>
+### `remove(collection: any, key: any) -> void`
 
-**Arguments:**
-* `func_name`: The name of the function to execute for each item. This can be the name of a standard library function (e.g., `"sqrt"`) or a user-defined function.
-* `list`: The array containing the elements to process.
+Removes an element in-place:
+* **Array**: Removes element at the numeric index `key`.
+* **Map**: Removes entry with string key `key`.
 
-**Behavior:**
-* The function specified by `func_name` must accept exactly one argument (the current element) and return a value.
-* Returns a **new** array of the same length as the input `list`, containing the results.
-* Supports both native functions and user-defined functions.
+---
 
-**Examples:**
+<a name="min_listlist-f64---f64"></a>
+### `min_list(list: f64[]) -> f64`
 
-```javascript
-// Example 1: Using a user-defined math function
-fn double(x) { 
-    ret x * 2 
-}
+Finds the smallest numeric value in a list.
 
-var numbers = range(0, 1, 3) // [0, 1, 2, 3]
-var doubled = for_list("double", numbers)
-print(doubled)
-// Result: [0, 2, 4, 6]
+---
 
+<a name="max_listlist-f64---f64"></a>
+### `max_list(list: f64[]) -> f64`
 
-// Example 2: Using a user-defined string function
-fn add_fish(x) { 
-    ret f"{x}fish" 
-}
+Finds the largest numeric value in a list.
 
-var animals = ["cat", "dog"]
-var aquatic = for_list("add_fish", animals)
-print(aquatic)
-// Result: ["catfish", "dogfish"]
-```
+---
 
-<!-- TOC --><a name="type-conversion"></a>
-## Type Conversion
-<!-- TOC --><a name="to_string"></a>
-### `to_string(value: any) -> str`
+<a name="for_listfunc_name-string-list-any---any"></a>
+### `for_list(func_name: string, list: any[]) -> any[]`
 
-Converts a value to its string representation.
+Maps each element of `list` through the named function, returning a new array with the mapped results.
 
-**Arguments:**
-* `value`: The value to convert.
+---
 
-**Returns:**
-* The string representation of the value.
+<a name="filterarray-any-func_name-string---any"></a>
+### `filter(array: any[], func_name: string) -> any[]`
+
+Filters elements in `array` by calling `func_name(item)` and retaining items where the predicate returns true.
+
+---
+
+<a name="param_filterarray-any-func_name-string-param-any---any"></a>
+### `param_filter(array: any[], func_name: string, param: any) -> any[]`
+
+Filters elements in `array` by calling `func_name(item, param)` with an extra parameter.
+
+---
+
+<a name="copyvalue-any---any"></a>
+### `copy(value: any) -> any`
+
+Creates a deep copy of an object, array, or map.
+
+---
+
+## Type Inspection & Conversion
+
+<a name="typevalue-any---string"></a>
+### `type(value: any) -> string`
+
+Returns the runtime type name of a variable as a string (`"str"`, `"num"`, `"list"`, `"map"`, `"bytes"`, `"struct"`, etc.).
+
+---
+
+<a name="to_stringvalue-any---string"></a>
+### `to_string(value: any) -> string`
+
+Converts any value into its string representation.
 
 **Example:**
 ```javascript
-var n = 123
-var s = to_string(n) 
-print(f"{s}4") // "1234"
+n: i32 = 123
+s: string = to_string(n)
 ```
-<!-- TOC --><a name="to_num"></a>
-### `to_num(value: any) -> num`
 
-Converts a value (usually a string) to a number.
+---
 
-**Arguments:**
-* `value`: The string to convert.
+<a name="to_numvalue-any---f64"></a>
+### `to_num(value: any) -> f64`
 
-**Returns:**
-* The numeric value. Returns `0` if the conversion fails.
+Converts a string representation of a number into an `f64`. Returns `0.0` on failure.
+
+---
+
+## Time & Timing
+
+<a name="clock---f64"></a>
+### `clock() -> f64`
+
+Returns the current monotonic wall clock time in seconds with sub-millisecond precision (`clock_gettime(CLOCK_MONOTONIC)` on POSIX, `QueryPerformanceCounter` on Windows).
 
 **Example:**
 ```javascript
-var s = "45.5"
-var n = to_num(s)
-print(n + 10) // 55.5
+t0: f64 = clock()
+// perform computation
+t1: f64 = clock()
+elapsed: f64 = t1 - t0
+print(f"Elapsed: {elapsed} seconds")
 ```
 
-<!-- TOC --><a name="file-io-text"></a>
-## File I/O (Text)
+---
 
-<!-- TOC --><a name="read_linespath-str-arr"></a>
-### `read_lines(path: str) -> arr`
+<a name="sleepms-i32---void"></a>
+### `sleep(ms: i32) -> void`
 
-Reads a text file and returns its content as an array of strings, where each element represents one line of the file.
-
-**Arguments:**
-* `path`: The path to the file.
-
-**Returns:**
-* An array of strings. Returns an empty array if the file cannot be read.
+Suspends execution of the current thread for the specified number of milliseconds.
 
 **Example:**
 ```javascript
-var lines = read_lines("data.txt")
+sleep(50) // Sleep 50ms
+```
+
+---
+
+## File I/O (Text & Binary)
+
+<a name="read_linespath-string---string"></a>
+### `read_lines(path: string) -> string[]`
+
+Reads a text file line-by-line and returns an array of strings.
+
+**Example:**
+```javascript
+lines: string[] = read_lines("data.txt")
 for (line in lines) {
     print(line)
 }
 ```
 
-<!-- TOC --><a name="write_filepath-str-content-str-mode-str-num"></a>
-### `write_file(path: str, content: str, mode: str) -> num`
+---
 
-Writes a string to a file. Supports overwriting or appending.
+<a name="write_filepath-string-content-string-mode-string---i32"></a>
+### `write_file(path: string, content: string, mode: string) -> i32`
 
-**Arguments:**
-* `path`: The path to the file.
-* `content`: The string data to write.
-* `mode`: The file mode.
-  * `"w"`: Write (Overwrite). Creates the file if it doesn't exist, or truncates it if it does.
-  * `"a"`: Append. Writes data to the end of the file.
+Writes text content to a file.
+* `mode`: `"w"` to truncate/overwrite, or `"a"` to append.
 
 **Returns:**
 * `1` on success, `0` on failure.
 
 **Example:**
 ```javascript
-// Create/Overwrite file
-write_file("log.txt", "Log Started\n", "w")
-
-// Append to file
-write_file("log.txt", "New Entry\n", "a")
+ok: i32 = write_file("out.txt", "Hello World\n", "w")
 ```
 
-<!-- TOC --><a name="file-io-binary"></a>
-## File I/O (Binary)
+---
 
-<!-- TOC --><a name="read_bytespath-str-stride-num-arr"></a>
-### `read_bytes(path: str, stride: num) -> arr`
+<a name="read_bytespath-string-stride-i32---i32"></a>
+### `read_bytes(path: string, stride: i32) -> i32[]`
 
-Reads a file in binary mode and returns the data as an array of numbers.
+Reads a binary file into an array of integers.
+* `stride = 1`: Reads individual 8-bit unsigned bytes (0–255).
+* `stride = 4`: Reads 32-bit integers (Little-Endian).
 
-**Arguments:**
-* `path`: The path to the file.
-* `stride`: The size of each element to read.
-  * `1`: Read as individual bytes (0-255).
-  * `4`: Read as 32-bit Integers (Little Endian).
+---
+
+<a name="write_bytespath-string-data-i32---i32"></a>
+### `write_bytes(path: string, data: i32[]) -> i32`
+
+Writes an array of integer values as raw bytes (each value clamped to 0–255) to the specified file.
+
+---
+
+<a name="list_dirpath-string-filter-string---string"></a>
+### `list_dir(path: string, filter: string) -> string[]`
+
+Lists filenames in the specified directory matching a file extension or suffix filter (e.g. `".mylo"` or `""` for all files).
+
+---
+
+## OS System & Process Management
+
+<a name="systemcommand-string---string"></a>
+### `system(command: string) -> string[]`
+
+Executes a shell command synchronously and waits for completion.
 
 **Returns:**
-* An array of numbers representing the file content.
+* A 2-element array `[stdout, stderr]`.
 
 **Example:**
 ```javascript
-// Read as raw bytes
-var bytes = read_bytes("image.png", 1)
-print(bytes[0]) // First byte (e.g., 137 for PNG)
-
-// Read as 32-bit integers
-var ints = read_bytes("data.bin", 4)
-print(ints[0])
+res: string[] = system("echo hello")
+print(res[0]) // "hello"
 ```
 
-<!-- TOC --><a name="write_bytespath-str-data-arr-num"></a>
-### `write_bytes(path: str, data: arr) -> num`
+---
 
-Writes an array of numbers to a file as raw bytes.
+<a name="system_threadcommand-string-name-string---i32"></a>
+### `system_thread(command: string, name: string) -> i32`
 
-**Arguments:**
-* `path`: The path to the file.
-* `data`: An array of numbers. Each number is cast to a byte (0-255) before writing.
+Starts a background OS process under a unique job name string.
 
-**Returns:**
-* `1` on success, `0` on failure.
+---
 
-**Example:**
-```javascript
-// Write ASCII bytes for "ABC\n"
-var data = [65, 66, 67, 10]
-write_bytes("output.bin", data)
-```
+<a name="get_jobname-string---any"></a>
+### `get_job(name: string) -> any`
 
-## System & Process Management
+Polls the status of a background process started with `system_thread`:
+* `1`: Still running.
+* `-1`: Error or unknown job name.
+* `string[]`: Two-element array `[stdout, stderr]` once finished.
 
-<a name="systemcommand-str-arr"></a>
-### `system(command: str) -> arr`
+---
 
-Executes a shell command and waits for it to complete, capturing both standard output and standard error.
-
-**Arguments:**
-* `command`: The full command string to execute (e.g., `"ls -la"` or `"dir"`).
-
-**Returns:**
-* An array containing two strings: `[stdout, stderr]`.
-
-**Example:**
-```javascript
-var output = system("echo Hello Mylo")
-print(output[0]) // "Hello Mylo"
-```
-
-<a name="system_threadcommand-str-name-str-num"></a>
-### `system_thread(command: str, name: str) -> num`
-
-Starts a shell command in a background thread. The result must be retrieved later using `get_job`.
-
-**Arguments:**
-* `command`: The command string to execute.
-* `name`: A unique identifier string to associate with this background job.
-
-**Returns:**
-* `1` if the thread started successfully, `0` otherwise.
-
-<a name="get_jobname-str-any"></a>
-### `get_job(name: str) -> any`
-
-Polls the status of a background job started by `system_thread`.
-
-**Arguments:**
-* `name`: The identifier used when the job was created.
-
-**Returns:**
-* `1`: The job is still running.
-* `-1`: The job encountered an error or the name does not exist.
-* `arr`: A two-element array `[stdout, stderr]` if the job has finished.
-
-**Example:**
-```javascript
-system_thread("sleep 2 && echo Done", "my_job")
-
-forever {
-    var res = get_job("my_job")
-    if (res == 1) {
-        print("Working...")
-    } else {
-        print(f"Result: {res[0]}")
-        break
-    }
-}
-```
-
-<a name="terminal-input"></a>
 ## Terminal Input
 
-These functions allow for real-time interaction with the terminal, enabling TUI applications, games, and interactive tools.
+<a name="cgetblocking-i32---string"></a>
+### `cget(blocking: i32) -> string`
 
-<a name="cgetblocking-num-str"></a>
-### `cget(blocking: num) -> str`
-
-Reads a single character from the standard input.
-
-**Arguments:**
-* `blocking`:
-  * `1`: Blocks execution until a key is pressed.
-  * `0`: Non-blocking. Returns an empty string `""` immediately if no key is pressed.
-
-**Returns:**
-* A string containing the character code (e.g., "a", "1").
-* Returns `""` if non-blocking and no input is available.
-
-**Example:**
-```javascript
-// Wait for user to press a key
-var key = cget(1)
-print("You pressed: " + key)
-```
-
-<a name="kbhit-num"></a>
-### `kbhit() -> num`
-
-Checks if a key has been pressed and is waiting in the buffer.
-
-**Returns:**
-* `1`: A key is waiting to be read.
-* `0`: No keys are pressed.
-
-**Example:**
-```javascript
-if (kbhit()) {
-    print("Key pressed!")
-}
-```
-
-<a name="get_keys-arr"></a>
-### `get_keys() -> arr`
-
-Reads and clears the entire input buffer, returning a list of all key events that occurred since the last check.
-
-**Returns:**
-* An array of strings representing the keys pressed.
-* Special keys are returned as tags: `[UP]`, `[DOWN]`, `[LEFT]`, `[RIGHT]`, `[ESC]`, `[ENTER]`, `[BACKSPACE]`, `[TAB]`, `[HOME]`, `[END]`, `[INS]`, `[DEL]`.
-* Function keys are returned as `[F1]` to `[F10]`.
-* Control combinations are returned as `[CTRL+A]` ... `[CTRL+Z]`.
-* Alt combinations (Linux only) are returned as `[ALT+X]`.
-
-**Example:**
-```javascript
-var inputs = get_keys()
-
-// Process all inputs for this frame
-for (k in inputs) {
-    if (k == "[UP]") {
-        player_y = player_y - 1
-    }
-    if (k == "q") {
-        running = 0
-    }
-}
-```
-
-<a name="multithreading"></a>
-## Threading (Workers)
-
-> [!WARNING]
-> **DEPRECATED**: The worker and threading model in Mylo was previously based on Region memory ownership transfer. With the introduction of the new Mark-and-Sweep Garbage Collector, the isolated region-based threading model has been deprecated. Workers and the Universal Bus are currently non-functional and will be rewritten in a future release to support concurrent GC.
-
-The documentation below describes the **legacy** behavior of Mylo workers.
-
-In Mylo, true multi-threading was achieved using **Workers**. A worker is a completely isolated VM instance running on a background OS thread. Because they share nothing by default, there are no race conditions or need for locks on standard variables.
-
-To share data between the main thread and a worker, you transferred ownership of a memory region.
-
-<a name="create_workerregion-num-function-str-num"></a>
-### `create_worker(region: region, function_name: str) -> num`
-
-Spawns a new thread to execute a specific function. Ownership of the provided memory region is transferred to the worker thread.
-
-**Arguments:**
-* `region`: The memory region identifier (e.g., created via `region my_mem`).
-* `function_name`: The name of the function to execute in the new thread.
-
-**Returns:**
-* A numeric `worker_id` (0 or greater) if successful.
-* `-1` if the worker could not be created (e.g., max threads reached).
-
-**Runtime Safety:**
-* Attempting to access variables within the passed `region` from the main thread *after* calling this function (but *before* docking) will result in a Runtime Error.
-
-<a name="check_workerworker_id-num-num"></a>
-### `check_worker(worker_id: num) -> num`
-
-Non-blocking check of a worker's execution status.
-
-**Arguments:**
-* `worker_id`: The ID returned by `create_worker`.
-
-**Returns:**
-* `0`: The worker is still running.
-* `1`: The worker has completed execution.
-* `-1`: Invalid worker ID or the worker is not active.
-
-
-<a name="dock_workerworker_id-num-void"></a>
-### `dock_worker(worker_id: num) -> void`
-
-Blocks the calling thread until the specified worker has finished execution. Once the worker joins, ownership of its memory region is returned to the main thread.
-
-**Arguments:**
-* `worker_id`: The ID returned by `create_worker`.
-
-**Behavior:**
-* If the worker is still running, this function waits (blocks).
-* Once returned, variables in the region passed to `create_worker` become accessible again in the main thread.
-
-#### Example
-```javascript
-// --- Threading Test Program ---
-
-// Create a region for the job
-region job_mem
-
-// 1. Declare 'result' globally so Main can see it.
-// 2. Use an Array '[0]' so the data lives in the Region (Heap), not just the stack.
-var job_mem::result = [0]
-
-// 1. Define the function that will run in the thread
-fn worker_task() {
-    print("  [Worker] Thread started. Processing...")
-    
-    // Simulate heavy work
-    var total = 0
-    for (var i in 0...5000) {
-        total = total + 1
-    }
-    
-    // [FIX] 3. Update the value inside the array
-    job_mem::result[0] = total
-    
-    print("  [Worker] Done! Result stored.")
-}
-
-// 2. Main Program
-print("[Main] Initializing...")
-
-// Initialize some data in that region
-// (Primitives like '100' are fine for read-only input because they are copied)
-var job_mem::input = 100
-
-print("[Main] Spawning worker...")
-var worker_id = create_worker(job_mem, "worker_task")
-
-if (worker_id < 0) {
-    print("[Main] Failed to create worker!")
-} else {
-    print(f"[Main] Worker running (ID: {to_string(worker_id)})")
-    
-    var running = 1
-    forever {
-        if (running != 1) {
-            break 
-        }
-        var status = check_worker(worker_id)
-        
-        // !!! WARNING !!!
-        // If we try to check job_mem here, we will get an 
-        // access violation!
-        // print(job_mem::result[0]) 
-        
-        if (status == 1) {
-            print("[Main] Worker reported complete.")
-            running = 0
-        }
-    }
-    
-    print("[Main] Docking worker...")
-    dock_worker(worker_id)
-    
-    print("[Main] Retrieving result from worker memory...")
-    
-    // 4. Read the value from the array
-    var res = job_mem::result[0]
-    print(f"[Main] Calculation Result: {to_string(res)}")
-    
-    if (res == 5000) {
-        print("[Main] SUCCESS: Threading working correctly.")
-    } else {
-        print("[Main] FAILURE: Result incorrect.")
-    }
-    
-    clear(job_mem)
-```
-
-<a name="universal-bus"></a>
-## Universal Bus
-
-The Universal Bus is a thread-safe, global key-value store that allows all VM instances (threads) to communicate and share simple data. It uses a global lock, making it safe for concurrent access but potentially slower than region-based memory sharing.
-
-It is ideal for signaling state changes, broadcasting status updates, or sharing configuration strings between workers.
-
-<a name="bus_setkey-str-value-any-num"></a>
-### `bus_set(key: str, value: any) -> num`
-
-Stores a value in the global bus under the specified key. If the key already exists, its value is overwritten.
-
-**Arguments:**
-* `key`: A unique string identifier for the data.
-* `value`: The data to store.
-  * Supported types: Numbers (`num`) and Strings (`str`).
-  * **Note:** Passing Objects (Arrays/Maps) is not fully supported; they may be converted to a placeholder string.
-
-**Returns:**
-* `1` if the operation was successful.
-* `0` if the bus is full or an error occurred.
-
-**Example:**
-```javascript
-// Main thread sets a config
-bus_set("difficulty", 2)
-bus_set("server_msg", "Ready")
-```
-
-<a name="bus_getkey-str-any"></a>
-### `bus_get(key: str) -> any`
-
-Retrieves a value from the global bus.
-
-**Arguments:**
-* `key`: The identifier of the data to retrieve.
-
-**Returns:**
-* The stored value (Number or String).
-* Returns `0` if the key is not found.
-
-**Example:**
-```javascript
-// Worker thread reads the config
-var diff = bus_get("difficulty")
-
-if (diff > 1) {
-    print("Hard Mode Active")
-}
-```
-
-# Mylo Web Visual Library
-
-The Web Library provides a high-fidelity alternative to standard terminal output. It enables hardware-accelerated 2D graphics, anti-aliased primitives, and transparent UI overlays using standard web technologies. 
-
-### **Getting Started**
-1.  Call `web_init()` at the start of your script. 
-2.  Open your browser to `http://localhost:8080`. 
-3.  The script will pause until the browser connects, then begin streaming. 
+Reads a single character from terminal standard input.
+* `blocking = 1`: Blocks until a key is pressed.
+* `blocking = 0`: Non-blocking; returns `""` if no key is ready.
 
 ---
 
-## **Core Lifecycle**
+<a name="kbhit---i32"></a>
+### `kbhit() -> i32`
 
-### `web_init() -> any`
-Initializes the background TCP server and sets up the internal EventSource stream. 
-* **Behavior:** Blocks execution until a browser successfully connects to the display URL. 
-* **URL:** `http://localhost:8080` 
-
-### `web_status(wait: num) -> num`
-Checks the connection status of the browser display. 
-* **Arguments:** * `wait`: If `0`, performs a non-blocking check. 
-  * If `1`, blocks execution until a new browser connection is established (useful for handling window refreshes). 
-* **Returns:** `1` if a browser is currently connected, `0` otherwise. 
-
-### `web_clr() -> any`
-Clears the entire canvas, resetting it to a transparent state.  Use this at the start of every frame in a `forever` loop to prevent "trails" from moving objects. 
+Returns `1` if a key has been pressed and is waiting in the input buffer, or `0` if empty.
 
 ---
 
-## **Drawing Primitives**
+<a name="get_keys---string"></a>
+### `get_keys() -> string[]`
 
-All drawing functions accept a `color` string as their final argument.  The browser engine supports:
-* **Named Colors:** `"orange"`, `"cyan"`, `"magenta"` 
-* **Hex Codes:** `"#FF5500"`, `"#00CCFF"` 
-* **RGBA:** `"rgba(255, 0, 0, 0.5)"` (Supports transparency) 
-
-### `web_rect(x: num, y: num, w: num, h: num, color: str) -> any`
-Draws a filled rectangle at the specified coordinates. 
-* **x, y**: The top-left corner of the rectangle. 
-* **w, h**: The width and height in pixels. 
-
-### `web_circle(x: num, y: num, r: num, color: str) -> any`
-Draws a filled, anti-aliased circle. 
-* **x, y**: The center point of the circle. 
-* **r**: The radius in pixels. 
-
-### `web_line(x1: num, y1: num, x2: num, y2: num, thickness: num, color: str) -> any`
-Draws a line between two points. 
-* **x1, y1**: Starting coordinates. 
-* **x2, y2**: Ending coordinates. 
-* **thickness**: The width of the line in pixels. 
-
-### `web_triangle(x1: num, y1: num, x2: num, y2: num, x3: num, y3: num, color: str) -> any`
-Draws a filled triangle using three sets of coordinates.
-* **x1, y1 / x2, y2 / x3, y3**: The three vertices of the triangle.
-* **color**: Standard color string (name, hex, or rgba).
-
+Reads and flushes all pending terminal input events, returning an array of string key representations (including control keys like `"[UP]"`, `"[DOWN]"`, `"[ENTER]"`).
 
 ---
 
-## **Text & UI**
+## Multithreading & Universal Bus
 
-### `web_text(text: str, x: num, y: num, size: num) -> any`
-Renders high-fidelity text using the browser's default monospace font. 
-* **text**: The string to display. 
-* **x, y**: The baseline starting coordinates. 
-* **size**: The font size in pixels (e.g., `24`). 
+Mylo provides true multithreading with isolated background worker virtual machines and a thread-safe Universal Bus for message passing.
+
+<a name="create_workerfunction_name-string---i32"></a>
+### `create_worker(function_name: string) -> i32`
+
+Spawns a new background thread executing `function_name`. The function must be declared globally.
+
+**Returns:**
+* Worker ID (`0` to `MAX_WORKERS - 1`) on success, or `-1` if no slots are available.
 
 ---
 
-## **Example Usage**
+<a name="check_workerworker_id-i32---i32"></a>
+### `check_worker(worker_id: i32) -> i32`
 
+Non-blocking check of a worker's completion status.
+* `0`: Worker is actively running.
+* `1`: Worker has completed.
+* `-1`: Invalid worker ID.
+
+---
+
+<a name="dock_workerworker_id-i32---void"></a>
+### `dock_worker(worker_id: i32) -> void`
+
+Blocks the calling thread until the specified worker has finished execution and joins its thread.
+
+---
+
+<a name="bus_setkey-string-value-any---i32"></a>
+### `bus_set(key: string, value: any) -> i32`
+
+Sets a key-value pair in the global thread-safe Universal Bus. Overwrites existing keys.
+
+**Example:**
 ```javascript
-// Initialize the display
-web_init()
-
-forever {
-    // Re-connect if the browser window was closed/refreshed
-    if (web_status(0) == 0) {
-        print("Waiting for browser...")
-        web_status(1) 
-    }
-
-    // Start a new frame
-    web_clr()
-    
-    // Draw a semi-transparent background
-    web_rect(0, 0, 1920, 1080, "rgba(20, 20, 20, 0.8)")
-    
-    // Draw an orange circle
-    web_circle(400, 300, 50, "orange")
-    
-    // Draw a grid line
-    web_line(0, 300, 800, 300, 2, "#444")
-    
-    // Render status text
-    web_text("System Online", 20, 40, 20)
-}
+bus_set("task_status", "in_progress")
+bus_set("row_0", 12345)
 ```
 
-# Metaprogramming and Function Calls
+---
 
-Mylo has specific functionality to allow dynamic programming by calling functions by their 
-string name, and passing arguments.
+<a name="bus_getkey-string---any"></a>
+### `bus_get(key: string) -> any`
 
-### `call(name: str, args: list) -> any`
-Call a function will a list of args, function must unpack the list
-* **name**: The function name
-* **args**: The list of args
+Retrieves a value from the Universal Bus by key. Returns `0` if the key is not found.
 
-#### Example Usage:
+**Example:**
+```javascript
+val: string = bus_get("task_status")
+```
+
+#### Complete Multithreading Example
 
 ```javascript
-fn my_func(x) {
-    print(x + 1)
+fn compute_worker() {
+    start_row: i32 = bus_get("start")
+    end_row: i32 = bus_get("end")
+    sum: i64 = 0
+    for (i in start_row ... end_row) {
+        sum = sum + i
+    }
+    bus_set("result", sum)
 }
 
-call("my_func", [[2 , 3]]) // <--- Note the double brackets here!
+bus_set("start", 1)
+bus_set("end", 1000)
+worker: i32 = create_worker("compute_worker")
 
-// prints [3, 4] 
+dock_worker(worker)
+total: i64 = bus_get("result")
+print(f"Total: {total}")
+```
+
+---
+
+## Web Visual Library
+
+Mylo includes a built-in HTTP server and canvas visualizer (`http://localhost:8080`) for 2D graphics and dashboards.
+
+<a name="web_init---void"></a>
+### `web_init() -> void`
+
+Initializes the background TCP web server on port 8080 and pauses execution until a web browser connects to `http://localhost:8080`.
+
+---
+
+<a name="web_statuswait-i32---i32"></a>
+### `web_status(wait: i32) -> i32`
+
+Checks browser connection status.
+* `wait = 0`: Non-blocking check. Returns `1` if connected, `0` otherwise.
+* `wait = 1`: Blocks until a browser connects.
+
+---
+
+<a name="web_clr---void"></a>
+### `web_clr() -> void`
+
+Clears the web canvas.
+
+---
+
+<a name="web_rectx-f64-y-f64-w-f64-h-f64-color-string---void"></a>
+### `web_rect(x: f64, y: f64, w: f64, h: f64, color: string) -> void`
+
+Draws a filled rectangle on the web canvas. Supports named colors (`"red"`), hex codes (`"#112233"`), and RGBA strings (`"rgba(255, 255, 255, 0.5)"`).
+
+---
+
+<a name="web_circlex-f64-y-f64-r-f64-color-string---void"></a>
+### `web_circle(x: f64, y: f64, r: f64, color: string) -> void`
+
+Draws a filled circle with center `(x, y)` and radius `r`.
+
+---
+
+<a name="web_linex1-f64-y1-f64-x2-f64-y2-f64-thickness-f64-color-string---void"></a>
+### `web_line(x1: f64, y1: f64, x2: f64, y2: f64, thickness: f64, color: string) -> void`
+
+Draws a line between `(x1, y1)` and `(x2, y2)`.
+
+---
+
+<a name="web_trianglex1-f64-y1-f64-x2-f64-y2-f64-x3-f64-y3-f64-color-string---void"></a>
+### `web_triangle(x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64, color: string) -> void`
+
+Draws a filled triangle with vertices `(x1, y1)`, `(x2, y2)`, and `(x3, y3)`.
+
+---
+
+<a name="web_texttext-string-x-f64-y-f64-size-f64---void"></a>
+### `web_text(text: string, x: f64, y: f64, size: f64) -> void`
+
+Renders text at `(x, y)` with font size `size` in pixels.
+
+---
+
+## Metaprogramming
+
+<a name="callname-string-args-any---any"></a>
+### `call(name: string, args: any[]) -> any`
+
+Invokes a function dynamically by its string identifier with an array of arguments.
+
+**Example:**
+```javascript
+fn greet(msg: string) {
+    print(f"Message: {msg}")
+}
+
+call("greet", ["Hello from dynamic call!"])
 ```

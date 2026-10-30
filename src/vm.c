@@ -1208,7 +1208,19 @@ static void exec_array_op(VM* vm, int op) {
     } else if (op == OP_AGET) {
         CHECK_STACK(2);
         double key = vm_pop(vm); int kt = vm->stack_types[vm->sp+1];
-        double ptr = vm_pop(vm);
+        double ptr = vm_pop(vm); int pt = vm->stack_types[vm->sp+1];
+
+        if (pt == T_STR) {
+            const char* s = vm->string_pool[(int)ptr];
+            int len = (int)strlen(s);
+            int idx = (int)key;
+            if (idx < 0) idx += len;
+            if (idx < 0 || idx >= len) RUNTIME_ERROR("String Index OOB");
+            char ch[2] = { s[idx], '\0' };
+            int sid = make_string(vm, ch);
+            vm_push(vm, (double)sid, T_STR);
+            return;
+        }
 
         double* base = vm_resolve_ptr(vm, ptr);
         int* types = vm_resolve_type(vm, ptr);
@@ -1264,10 +1276,16 @@ static void exec_array_op(VM* vm, int op) {
     } else if (op == OP_ALEN) {
         CHECK_STACK(1);
         double ptr = vm_pop(vm);
-        double* base = vm_resolve_ptr(vm, ptr);
-        int type = (int)base[HEAP_OFFSET_TYPE];
-        if (type == TYPE_MAP) vm_push(vm, base[HEAP_OFFSET_COUNT], T_NUM);
-        else vm_push(vm, base[HEAP_OFFSET_LEN], T_NUM);
+        int pt = vm->stack_types[vm->sp+1];
+        if (pt == T_STR) {
+            const char* s = vm->string_pool[(int)ptr];
+            vm_push(vm, (double)strlen(s), T_NUM);
+        } else {
+            double* base = vm_resolve_ptr(vm, ptr);
+            int type = (int)base[HEAP_OFFSET_TYPE];
+            if (type == TYPE_MAP) vm_push(vm, base[HEAP_OFFSET_COUNT], T_NUM);
+            else vm_push(vm, base[HEAP_OFFSET_LEN], T_NUM);
+        }
     } else if (op == OP_ASET) {
         CHECK_STACK(3);
         double val = vm_pop(vm); int vt = vm->stack_types[vm->sp+1];
@@ -1394,6 +1412,27 @@ static void exec_slice_op(VM* vm, int op) {
         double e = vm_pop(vm);
         double s = vm_pop(vm);
         double ptr = vm_pop(vm);
+        int pt = vm->stack_types[vm->sp+1];
+
+        if (pt == T_STR) {
+            const char* str_val = vm->string_pool[(int)ptr];
+            int len = (int)strlen(str_val);
+            int start = (int)s; int end = (int)e;
+            if (start < 0) start += len;
+            if (end < 0) end += len;
+            if (start < 0) start = 0;
+            if (end >= len) end = len - 1;
+            int newlen = (end >= start) ? (end - start + 1) : 0;
+            if (start >= len) newlen = 0;
+            char sub[MAX_STRING_LENGTH];
+            if (newlen >= MAX_STRING_LENGTH) newlen = MAX_STRING_LENGTH - 1;
+            if (newlen > 0) memcpy(sub, str_val + start, newlen);
+            sub[newlen] = '\0';
+            int sid = make_string(vm, sub);
+            vm_push(vm, (double)sid, T_STR);
+            return;
+        }
+
         double* base = vm_resolve_ptr(vm, ptr);
         int* types = vm_resolve_type(vm, ptr);
         int type = (int)base[HEAP_OFFSET_TYPE];

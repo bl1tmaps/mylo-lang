@@ -53,15 +53,14 @@ It is fast to write, fast to run, and can run anywhere.
 
 <a name="technical-intro-for-nerds"></a>
 ## Technical Intro (for nerds)
-Mylo uses a high-level syntax like Python or Javascript, but is *Gradually Typed*. Code
+Mylo uses a high-level syntax like Python or Javascript. Code
 is compiled to a virtual machine (VM), and it is executed on any platform with Mylo installed. Mylo also
 supports compiling to a binary, with embedded VM code, as well as interfacing with native libraries.
 
 <a name="variables"></a>
 ## Variables & Scoping
 
-Mylo is strictly and statically typed. All variable declarations require an explicit type annotation.
-There is no `var` keyword (it has been removed as redundant), and there is no type guessing.
+Mylo is strictly and statically typed. All variable declarations require an explicit type annotation and there is no type guessing.
 
 ### Declaration Syntax
 Variables are declared by specifying the name, a colon `:`, the type, and an initial value:

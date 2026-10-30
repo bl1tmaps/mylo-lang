@@ -71,6 +71,21 @@ void std_get_keys(VM *vm);
 // Call via name
 void std_call(VM *vm);
 
+// Math & Utility Extensions
+void std_clock(VM *vm);
+void std_abs(VM *vm);
+void std_clamp(VM *vm);
+void std_sleep(VM *vm);
+void std_ord(VM *vm);
+void std_chr(VM *vm);
+void std_bit_and(VM *vm);
+void std_bit_or(VM *vm);
+void std_bit_xor(VM *vm);
+void std_bit_not(VM *vm);
+void std_bit_shl(VM *vm);
+void std_bit_shr(VM *vm);
+void std_popcount(VM *vm);
+
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.
 extern const StdLibDef std_library[];

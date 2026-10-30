@@ -71,7 +71,7 @@ const char *get_token_name(MyloTokenType t) {
 
 typedef struct {
     MyloTokenType type;
-    char text[MAX_IDENTIFIER];
+    char text[MAX_STRING_LENGTH];
     double val_float;
     int line;
     char *start;
@@ -150,6 +150,7 @@ struct StructDef {
     char name[MAX_IDENTIFIER];
     char fields[MAX_FIELDS][MAX_IDENTIFIER];
     int field_types[MAX_FIELDS]; // Added to store type IDs
+    bool field_is_array[MAX_FIELDS];
     int field_count;
     char methods[MAX_FIELDS][MAX_IDENTIFIER];
     int method_count;
@@ -460,6 +461,27 @@ void emit_continue() {
     emit(0);
 }
 
+static void unescape_string(char *dest, const char *src_str, int max_len) {
+    int d = 0;
+    for (int i = 0; src_str[i] != '\0' && d < max_len - 1; i++) {
+        if (src_str[i] == '\\' && src_str[i + 1] != '\0') {
+            i++;
+            if (src_str[i] == 'n') dest[d++] = '\n';
+            else if (src_str[i] == 't') dest[d++] = '\t';
+            else if (src_str[i] == 'r') dest[d++] = '\r';
+            else if (src_str[i] == '\\') dest[d++] = '\\';
+            else if (src_str[i] == '"') dest[d++] = '"';
+            else {
+                dest[d++] = '\\';
+                if (d < max_len - 1) dest[d++] = src_str[i];
+            }
+        } else {
+            dest[d++] = src_str[i];
+        }
+    }
+    dest[d] = '\0';
+}
+
 void next_token() {
     prev_token = curr;
     while (1) {
@@ -599,15 +621,35 @@ void next_token() {
     }
     if (*src == '"') {
         src++;
-        char *start = src;
+        int idx = 0;
         while (*src != '"' && *src != 0) {
             if (*src == '\n') line++;
-            src++;
+            if (*src == '\\') {
+                src++;
+                if (*src == 'n') {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '\n';
+                    src++;
+                } else if (*src == 't') {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '\t';
+                    src++;
+                } else if (*src == 'r') {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '\r';
+                    src++;
+                } else if (*src == '\\') {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '\\';
+                    src++;
+                } else if (*src == '"') {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '"';
+                    src++;
+                } else {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '\\';
+                    if (*src && idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = *src++;
+                }
+            } else {
+                if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = *src++;
+            }
         }
-        int len = (int) (src - start);
-        if (len > MAX_STRING_LENGTH - 1) len = MAX_STRING_LENGTH - 1;
-        strncpy(curr.text, start, len);
-        curr.text[len] = '\0';
+        curr.text[idx] = '\0';
         if (*src == '"') src++;
         curr.type = TK_STR;
         curr.length = (int) (src - curr.start);
@@ -1071,7 +1113,9 @@ void factor() {
                     char chunk[MAX_STRING_LENGTH]; int len = (int) (ptr - start);
                     if (len >= MAX_STRING_LENGTH) len = MAX_STRING_LENGTH - 1;
                     strncpy(chunk, start, len); chunk[len] = '\0';
-                    int id = make_string(compiling_vm, chunk); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
+                    char unesc[MAX_STRING_LENGTH];
+                    unescape_string(unesc, chunk, MAX_STRING_LENGTH);
+                    int id = make_string(compiling_vm, unesc); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
                 }
                 ptr++; char *expr_start = ptr;
                 while (*ptr && *ptr != '}') ptr++;
@@ -1093,7 +1137,9 @@ void factor() {
             char chunk[MAX_STRING_LENGTH]; int len = (int) (ptr - start);
             if (len >= MAX_STRING_LENGTH) len = MAX_STRING_LENGTH - 1;
             strncpy(chunk, start, len); chunk[len] = '\0';
-            int id = make_string(compiling_vm, chunk); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
+            char unesc[MAX_STRING_LENGTH];
+            unescape_string(unesc, chunk, MAX_STRING_LENGTH);
+            int id = make_string(compiling_vm, unesc); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
         }
         match(TK_FSTR);
 
@@ -1902,7 +1948,7 @@ static void parse_id_statement(Token start_token, char *name) {
                     expression();
 
                     // Strong Typing: If the leaf field has a specific type, cast the expression result
-                    if (field_type != TYPE_ANY) {
+                    if (field_type != TYPE_ANY && !struct_defs[type_id].field_is_array[offset]) {
                         emit(OP_CAST);
                         emit(field_type);
                     }
@@ -2272,6 +2318,7 @@ void struct_decl() {
             match(TK_COLON);
             TypeInfo ti = parse_type_spec();
             struct_defs[idx].field_types[struct_defs[idx].field_count] = ti.id;
+            struct_defs[idx].field_is_array[struct_defs[idx].field_count] = ti.is_array;
             struct_defs[idx].field_count++;
         } else if (curr.type == TK_FN) {
             match(TK_FN);
@@ -2395,9 +2442,10 @@ void parse_struct_literal(int struct_idx) {
         // --- NEW CODE START ---
         // Look up the definition of the field we are setting
         int field_type = struct_defs[struct_idx].field_types[offset];
+        bool is_arr = struct_defs[struct_idx].field_is_array[offset];
 
         // If the field has a specific type (not 'any' and not generic 'num'), enforce it
-        if (field_type != TYPE_ANY) {
+        if (field_type != TYPE_ANY && !is_arr) {
             emit(OP_CAST);
             emit(field_type);
         }
