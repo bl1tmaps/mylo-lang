@@ -3,8 +3,8 @@ if exists("b:current_syntax")
 endif
 
 " 1. Keywords and Types (Based on TK_ enum in compiler.c)
-syntax keyword myloKeyword fn var if else for in ret print mod import break continue enum module_path true false forever embed region clear monitor debugger
-syntax keyword myloType any num str f64 f32 i32 i16 i64 byte bool
+syntax keyword myloKeyword fn cfn var if else elif for in ret print mod import native break continue enum module_path true false forever embed region clear monitor debugger
+syntax keyword myloType any num str f64 f32 f16 i64 i32 i16 i8 u64 u32 u16 u8 byte bytes bool
 
 " 2. Comments - Defined as // until newline in compiler.c
 syntax region myloComment start="//" end="$" contains=@NoGroup
