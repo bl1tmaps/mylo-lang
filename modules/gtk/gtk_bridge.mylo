@@ -28,7 +28,7 @@ fn ui_set_text(widget_id: str, text_val: str) {
 
 // 3. Helper to read text from an Entry widget
 fn ui_get_text(widget_id: str) {
-    var result = C(id: str = widget_id) -> str {
+    result: str = C(id: str = widget_id) -> str {
         GObject* obj = gtk_builder_get_object(g_builder, id);
         if (GTK_IS_ENTRY(obj)) {
             return (char*)gtk_entry_get_text(GTK_ENTRY(obj));

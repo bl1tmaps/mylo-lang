@@ -1,4 +1,4 @@
-#define VERSION_INFO "0.3.6"
+#define VERSION_INFO "0.4.0"
 #define MAX_INPUT 4096
 
 #include <setjmp.h>
@@ -29,8 +29,8 @@ void disassemble(VM* vm) {
     while (i < vm->code_size) {
         int op = vm->bytecode[i];
 
-        // Updated range check to include OP_EMBED
-        if (op < 0 || op > OP_DEBUGGER) {
+        // Updated range check to include OP_CAST_ARR
+        if (op < 0 || op > OP_CAST_ARR) {
             printf("%04d UNKNOWN %d\n", i, op);
             i++;
             continue;
@@ -104,6 +104,11 @@ void disassemble(VM* vm) {
                 int idx = vm->bytecode[i++];
                 unsigned int packed = (unsigned int)vm->constants[idx];
                 printf("[%d] (Enum %d -> \"%s\")", idx, packed & 0xFFFF, vm->string_pool[(packed >> 16) & 0xFFFF]);
+                break;
+            }
+            case OP_CAST_ARR: {
+                int target = vm->bytecode[i++];
+                printf("(target_type: %d)", target);
                 break;
             }
             default: break;
@@ -396,6 +401,7 @@ int main(int argc, char** argv) {
     }
 
     get_executable_dir(mylo_exe_dir, sizeof(mylo_exe_dir), argv[0]);
+    get_executable_dir(current_file_dir, sizeof(current_file_dir), fn);
     // Apply TUI Debugger settings to VM instance
     vm.source_code = content;
     vm.cli_debug_mode = cli_debug_mode;
@@ -436,6 +442,12 @@ int main(int argc, char** argv) {
 
     // --- INTERPRETER SAFETY CHECK ---
     if ((ffi_count - bound_ffi_count) > 0) {
+        for (int i = 0; i < ffi_count; i++) {
+            if (ffi_blocks[i].is_cfn && !ffi_blocks[i].is_bound) {
+                setTerminalColor(MyloFgRed, MyloBgColorDefault);
+                printf("error: native function %s was not found, either build mylo with these libraries, or provide shared libraries\n", ffi_blocks[i].c_symbol_name);
+            }
+        }
         setTerminalColor(MyloFgMagenta, MyloBgColorDefault);
         printf("Error: This program contains Native C blocks and no shared objects are found, so it cannot be interpreted.\n");
         setTerminalColor(MyloFgCyan, MyloBgColorDefault);

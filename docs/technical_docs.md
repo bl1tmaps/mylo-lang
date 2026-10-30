@@ -13,7 +13,7 @@ Unlike many VMs that use tagged unions (boxing), Mylo uses a "Nan-Boxing-adjacen
     * *Numbers* are stored directly.
     * *Strings* are stored as the integer ID of the string in the `string_pool`.
     * *Objects* (Arrays, Maps, Structs) are stored as the integer Index into the `heap`.
-* **The Heap (`vm.heap`)**: A flat array of `double` used for dynamic allocations.
+* **Memory Arenas (`vm.arenas`)**: Array of high-speed bump-allocated arenas. Default allocations go to arena 0 ('main'). Scoped arenas use `{[name] ... }`. Pointers are packed into a `double` with generation, arena ID, and offset bits. Garbage collection is avoided entirely for maximum performance.
 * **String Pool (`vm.string_pool`)**: A lookup table where strings are deduplicated. The Stack holds indices into this pool.
 
 ```mermaid

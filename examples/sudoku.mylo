@@ -1,0 +1,182 @@
+// A Sudoku solver using backtracking with the Most Constrained Variable heuristic.
+// The board state tracks digits and used bitmasks for rows, columns, and 3x3 boxes.
+//
+// Run:
+//   ./build/mylo examples/sudoku.mylo
+
+struct Board {
+    cells: array
+    rows: array
+    cols: array
+    boxes: array
+}
+
+guesses: i32 = 0
+
+fn bit(d: i32) {
+    ret bit_shl(1, d)
+}
+
+fn box_of(i: i32) {
+    ret floor(i / 27) * 3 + floor((i % 9) / 3)
+}
+
+fn place(b: Board, i: i32, d: i32) {
+    b.cells[i] = d
+    m: i32 = bit(d)
+    r_idx: i32 = floor(i / 9)
+    c_idx: i32 = i % 9
+    bx: i32 = box_of(i)
+    b.rows[r_idx] = bit_or(b.rows[r_idx], m)
+    b.cols[c_idx] = bit_or(b.cols[c_idx], m)
+    b.boxes[bx] = bit_or(b.boxes[bx], m)
+}
+
+fn unplace(b: Board, i: i32, d: i32) {
+    b.cells[i] = 0
+    m: i32 = bit_not(bit(d))
+    r_idx: i32 = floor(i / 9)
+    c_idx: i32 = i % 9
+    bx: i32 = box_of(i)
+    b.rows[r_idx] = bit_and(b.rows[r_idx], m)
+    b.cols[c_idx] = bit_and(b.cols[c_idx], m)
+    b.boxes[bx] = bit_and(b.boxes[bx], m)
+}
+
+// Digits still possible at cell i (bits 1..9)
+fn candidates(b: Board, i: i32) {
+    r_idx: i32 = floor(i / 9)
+    c_idx: i32 = i % 9
+    bx: i32 = box_of(i)
+    used: i32 = bit_or(bit_or(b.rows[r_idx], b.cols[c_idx]), b.boxes[bx])
+    ret bit_and(bit_not(used), 1022) // 1022 is 0x3FE (bits 1..9)
+}
+
+fn parse_board(text: string) {
+    c_arr: array = list(81)
+    r_arr: array = list(9)
+    co_arr: array = list(9)
+    b_arr: array = list(9)
+
+    for (k in 0 ... 80) {
+        c_arr[k] = 0
+    }
+    for (k in 0 ... 8) {
+        r_arr[k] = 0
+        co_arr[k] = 0
+        b_arr[k] = 0
+    }
+
+    b: Board = {
+        cells = c_arr
+        rows = r_arr
+        cols = co_arr
+        boxes = b_arr
+    }
+
+    pos: i32 = 0
+    for (idx in 0 ... 80) {
+        ch: string = text[idx]
+        code: i32 = ord(ch)
+        if (code >= 49 && code <= 57) {
+            d: i32 = code - 48
+            place(b, pos, d)
+        }
+        pos = pos + 1
+    }
+
+    ret b
+}
+
+fn solve(b: Board) {
+    // Pick the empty cell with the fewest candidates
+    best: i32 = -1
+    bestn: i32 = 10
+
+    for (i in 0 ... 80) {
+        if (b.cells[i] == 0) {
+            cands: i32 = candidates(b, i)
+            n: i32 = popcount(cands)
+            if (n < bestn) {
+                best = i
+                bestn = n
+            }
+        }
+    }
+
+    if (best < 0) {
+        ret 1 // Solved!
+    }
+    if (bestn == 0) {
+        ret 0 // Dead end
+    }
+
+    cands: i32 = candidates(b, best)
+    for (d in 1 ... 9) {
+        m: i32 = bit(d)
+        if (bit_and(cands, m) != 0) {
+            guesses = guesses + 1
+            place(b, best, d)
+            if (solve(b) == 1) {
+                ret 1
+            }
+            unplace(b, best, d)
+        }
+    }
+
+    ret 0
+}
+
+fn show_board(b: Board) {
+    for (r in 0 ... 8) {
+        line: string = ""
+        for (c in 0 ... 8) {
+            d: i32 = b.cells[r * 9 + c]
+            val_str: string = "."
+            if (d > 0) {
+                val_str = chr(48 + d)
+            }
+            line = line + val_str
+            if (c == 2 || c == 5) {
+                line = line + " | "
+            } elif (c < 8) {
+                line = line + " "
+            }
+        }
+        print(line)
+        if (r == 2 || r == 5) {
+            print("------+-------+------")
+        }
+    }
+}
+
+fn run_puzzle(name: string, puzzle: string) {
+    b: Board = parse_board(puzzle)
+    print(f"--- Puzzle: {name} ---")
+    show_board(b)
+    
+    guesses = 0
+    t0: f64 = clock()
+    ok: i32 = solve(b)
+    t1: f64 = clock()
+    ms: f64 = (t1 - t0) * 1000.0
+
+    if (ok == 1) {
+        print(f"Solved after {guesses} guesses ({ms} ms):")
+    } else {
+        print("No solution found.")
+    }
+    show_board(b)
+    print("")
+}
+
+fn main() {
+    print("=== Mylo Sudoku Solver ===")
+    print("")
+
+    run_puzzle("easy", "53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79")
+    run_puzzle("hard (Inkala 2012)", "8..........36......7..9.2...5...7.......457.....1...3...1....68..85...1..9....4..")
+    run_puzzle("sparse (17 clues)", "...8.1..........435............7.8........1...2..3....6......75..34........2..6..")
+}
+
+main()

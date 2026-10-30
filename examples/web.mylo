@@ -1,22 +1,153 @@
-web_init()
+// A robust interactive Web Canvas Dashboard and Physics Simulation.
+// Demonstrates web primitives (rect, circle, line, triangle, text) and SSE animation.
+//
+// To run:
+//   ./build/mylo examples/web.mylo
+//
+// Then open your browser at:
+//   http://localhost:8080
 
-forever {
-    
-    if (web_status(0) == 0) {
-        print("Waiting for reconnection...")
-        web_status(1) //Blocks for reconnection to 8080
-    }
-    web_clr()
-    
-    // 1. Named color
-    web_rect(50, 50, 100, 100, "orange")
-    
-    // 2. Hex color
-    web_circle(300, 100, 40, "#00ffcc")
-    
-    // 3. RGBA color (Transparency!)
-    web_line(50, 200, 400, 250, 5, "rgba(255, 255, 255, 0.5)")
-    
-    // 4. Creative overlapping
-    web_circle(100, 100, 60, "rgba(255, 0, 0, 0.3)")
+struct Particle {
+    x: f64
+    y: f64
+    vx: f64
+    vy: f64
+    radius: f64
+    color: string
 }
+
+fn main() {
+    print("==================================================")
+    print("  Mylo Web Canvas Dashboard")
+    print("  Open browser: http://localhost:8080")
+    print("==================================================")
+
+    web_init()
+
+    // Screen dimensions
+    WIDTH: f64 = 800.0
+    HEIGHT: f64 = 600.0
+
+    // Particle simulation data
+    p1: Particle = { x = 100.0, y = 150.0, vx = 3.5, vy = 2.0, radius = 16.0, color = "#ff4444" }
+    p2: Particle = { x = 400.0, y = 200.0, vx = -2.8, vy = 3.2, radius = 22.0, color = "#44ff44" }
+    p3: Particle = { x = 600.0, y = 100.0, vx = 2.0, vy = -2.5, radius = 14.0, color = "#4488ff" }
+    p4: Particle = { x = 250.0, y = 300.0, vx = -3.2, vy = -1.8, radius = 18.0, color = "#ffaa00" }
+
+    frame: i32 = 0
+    t_start: f64 = clock()
+
+    forever {
+        // Check if browser is still connected
+        if (web_status(0) == 0) {
+            print("Client disconnected. Waiting for browser connection...")
+            web_status(1) // Block until browser reconnects
+        }
+
+        // 1. Clear Screen
+        web_clr()
+
+        // 2. Draw Dark Background
+        web_rect(0, 0, WIDTH, HEIGHT, "#1a1a24")
+
+        // 3. Draw Header Card
+        web_rect(20, 20, 760, 60, "#252538")
+        web_text("MYLO GRAPHICS DASHBOARD", 40, 56, 20)
+        
+        elapsed: f64 = clock() - t_start
+        web_text(f"TIME: {to_string(floor(elapsed))}s | FRAME: {to_string(frame)}", 540, 56, 14)
+
+        // 4. Draw Main Simulation Box
+        web_rect(20, 100, 520, 340, "#12121a")
+        web_line(20, 100, 540, 100, 2, "#3a3a52")
+        web_line(540, 100, 540, 440, 2, "#3a3a52")
+        web_line(540, 440, 20, 440, 2, "#3a3a52")
+        web_line(20, 440, 20, 100, 2, "#3a3a52")
+
+        // 5. Update & Draw Particles in Simulation Box
+        // Particle 1
+        p1.x = p1.x + p1.vx
+        p1.y = p1.y + p1.vy
+        if (p1.x - p1.radius < 20.0 || p1.x + p1.radius > 540.0) { p1.vx = 0.0 - p1.vx }
+        if (p1.y - p1.radius < 100.0 || p1.y + p1.radius > 440.0) { p1.vy = 0.0 - p1.vy }
+        web_circle(p1.x, p1.y, p1.radius, p1.color)
+
+        // Particle 2
+        p2.x = p2.x + p2.vx
+        p2.y = p2.y + p2.vy
+        if (p2.x - p2.radius < 20.0 || p2.x + p2.radius > 540.0) { p2.vx = 0.0 - p2.vx }
+        if (p2.y - p2.radius < 100.0 || p2.y + p2.radius > 440.0) { p2.vy = 0.0 - p2.vy }
+        web_circle(p2.x, p2.y, p2.radius, p2.color)
+
+        // Particle 3
+        p3.x = p3.x + p3.vx
+        p3.y = p3.y + p3.vy
+        if (p3.x - p3.radius < 20.0 || p3.x + p3.radius > 540.0) { p3.vx = 0.0 - p3.vx }
+        if (p3.y - p3.radius < 100.0 || p3.y + p3.radius > 440.0) { p3.vy = 0.0 - p3.vy }
+        web_circle(p3.x, p3.y, p3.radius, p3.color)
+
+        // Particle 4
+        p4.x = p4.x + p4.vx
+        p4.y = p4.y + p4.vy
+        if (p4.x - p4.radius < 20.0 || p4.x + p4.radius > 540.0) { p4.vx = 0.0 - p4.vx }
+        if (p4.y - p4.radius < 100.0 || p4.y + p4.radius > 440.0) { p4.vy = 0.0 - p4.vy }
+        web_circle(p4.x, p4.y, p4.radius, p4.color)
+
+        // Draw spring connectors between particles
+        web_line(p1.x, p1.y, p2.x, p2.y, 1, "rgba(255, 255, 255, 0.2)")
+        web_line(p2.x, p2.y, p3.x, p3.y, 1, "rgba(255, 255, 255, 0.2)")
+        web_line(p3.x, p3.y, p4.x, p4.y, 1, "rgba(255, 255, 255, 0.2)")
+
+        // 6. Draw Radar / Rotating Compass Widget (Right Panel)
+        web_rect(560, 100, 220, 200, "#252538")
+        web_text("RADAR BEACON", 580, 130, 14)
+        center_x: f64 = 670.0
+        center_y: f64 = 210.0
+        web_circle(center_x, center_y, 60.0, "rgba(0, 255, 200, 0.1)")
+        web_circle(center_x, center_y, 40.0, "rgba(0, 255, 200, 0.15)")
+        web_circle(center_x, center_y, 20.0, "rgba(0, 255, 200, 0.2)")
+
+        // Rotating needle
+        angle: f64 = (frame % 360) * 0.05
+        hand_x: f64 = center_x + cos(angle) * 55.0
+        hand_y: f64 = center_y + sin(angle) * 55.0
+        web_line(center_x, center_y, hand_x, hand_y, 3, "#00ffcc")
+
+        // Draw Triangle Arrow
+        t_tip_x: f64 = center_x + cos(angle) * 58.0
+        t_tip_y: f64 = center_y + sin(angle) * 58.0
+        t_left_x: f64 = center_x + cos(angle + 2.8) * 12.0
+        t_left_y: f64 = center_y + sin(angle + 2.8) * 12.0
+        t_right_x: f64 = center_x + cos(angle - 2.8) * 12.0
+        t_right_y: f64 = center_y + sin(angle - 2.8) * 12.0
+        web_triangle(t_tip_x, t_tip_y, t_left_x, t_left_y, t_right_x, t_right_y, "#ffcc00")
+
+        // 7. Info Card (Right Bottom Panel)
+        web_rect(560, 320, 220, 120, "#252538")
+        web_text("CANVAS PRIMITIVES", 580, 350, 13)
+        web_text("* web_rect(x,y,w,h)", 580, 375, 11)
+        web_text("* web_circle(x,y,r)", 580, 395, 11)
+        web_text("* web_line(x1,y1,x2,y2)", 580, 415, 11)
+        web_text("* web_triangle()", 580, 435, 11)
+
+        // 8. Animated Oscilloscope Waveform (Bottom Panel)
+        web_rect(20, 460, 760, 110, "#12121a")
+        web_text("OSCILLOSCOPE SINE WAVEFORM", 40, 485, 12)
+
+        prev_wx: f64 = 40.0
+        prev_wy: f64 = 525.0
+        for (i in 0 ... 35) {
+            curr_wx: f64 = 40.0 + i * 20.0
+            phase: f64 = (frame * 0.1) + (i * 0.3)
+            curr_wy: f64 = 525.0 + sin(phase) * 25.0
+            web_line(prev_wx, prev_wy, curr_wx, curr_wy, 2, "#44aaff")
+            prev_wx = curr_wx
+            prev_wy = curr_wy
+        }
+
+        frame = frame + 1
+        sleep(16) // Target ~60 FPS
+    }
+}
+
+main()

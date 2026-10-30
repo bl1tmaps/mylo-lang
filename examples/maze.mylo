@@ -1,0 +1,235 @@
+// Shortest paths through a maze, two ways:
+// 1. Breadth-First Search (BFS) for the fewest steps.
+// 2. Dijkstra's Algorithm for the cheapest route when water costs 3 steps.
+//
+// Run:
+//   ./build/mylo examples/maze.mylo
+
+MAZE_STR: string = "####################\n#S.....#...........#\n#.####.#.#########.#\n#.#....#.#.......#.#\n#.#.####.#.#####.#.#\n#.#....~~~~~.....#.#\n#.####.~~~~~.#####.#\n#......~~~~~.......#\n#.#####.####.#####.#\n#..................#\n#.#########.####.#E#\n####################"
+
+W: i32 = 20
+H: i32 = 12
+
+fn cell_at(grid: string[], x: i32, y: i32) {
+    row: string = grid[y]
+    ret row[x]
+}
+
+fn passable(grid: string[], x: i32, y: i32) {
+    if (x < 0 || y < 0 || x >= W || y >= H) {
+        ret 0
+    }
+    c: string = cell_at(grid, x, y)
+    if (c == "#") {
+        ret 0
+    }
+    ret 1
+}
+
+fn step_cost(grid: string[], x: i32, y: i32) {
+    c: string = cell_at(grid, x, y)
+    if (c == "~") {
+        ret 3
+    }
+    ret 1
+}
+
+// Find index of character in grid
+fn find_char(grid: string[], target: string) {
+    for (y in 0 ... 11) {
+        row: string = grid[y]
+        for (x in 0 ... 19) {
+            if (row[x] == target) {
+                ret y * W + x
+            }
+        }
+    }
+    ret -1
+}
+
+// Breadth-First Search: fewest steps
+fn bfs(grid: string[], start: i32, goal: i32, parent: array) {
+    queue: array = list(W * H)
+    queue[0] = start
+    q_len: i32 = 1
+    parent[start] = start
+    head: i32 = 0
+
+    // 4 cardinal directions: [dx, dy]
+    dx: i32[] = [-1, 1, 0, 0]
+    dy: i32[] = [0, 0, -1, 1]
+
+    for (head < q_len) {
+        curr: i32 = queue[head]
+        head = head + 1
+        if (curr == goal) {
+            break
+        }
+
+        cx: i32 = curr % W
+        cy: i32 = curr / W
+
+        for (d in 0 ... 3) {
+            nx: i32 = cx + dx[d]
+            ny: i32 = cy + dy[d]
+
+            if (passable(grid, nx, ny) == 1) {
+                ni: i32 = ny * W + nx
+                if (parent[ni] < 0) {
+                    parent[ni] = curr
+                    queue[q_len] = ni
+                    q_len = q_len + 1
+                }
+            }
+        }
+    }
+
+    // Count steps back
+    steps: i32 = 0
+    i: i32 = goal
+    for (i != start && parent[i] >= 0) {
+        i = parent[i]
+        steps = steps + 1
+    }
+    ret steps
+}
+
+// Dijkstra Search: cheapest route (water costs 3)
+fn dijkstra(grid: string[], start: i32, goal: i32, parent: array) {
+    total_cells: i32 = W * H
+    dist: array = list(total_cells)
+    visited: array = list(total_cells)
+    for (i in 0 ... 239) {
+        dist[i] = 1000000
+        visited[i] = 0
+    }
+
+    dist[start] = 0
+    parent[start] = start
+
+    dx: i32[] = [-1, 1, 0, 0]
+    dy: i32[] = [0, 0, -1, 1]
+
+    for (step in 0 ... 239) {
+        // Find unvisited node with smallest distance
+        best_u: i32 = -1
+        best_d: i32 = 1000000
+
+        for (i in 0 ... 239) {
+            if (visited[i] == 0 && dist[i] < best_d) {
+                best_d = dist[i]
+                best_u = i
+            }
+        }
+
+        if (best_u < 0 || best_u == goal) {
+            break
+        }
+
+        visited[best_u] = 1
+
+        cx: i32 = best_u % W
+        cy: i32 = best_u / W
+
+        for (d in 0 ... 3) {
+            nx: i32 = cx + dx[d]
+            ny: i32 = cy + dy[d]
+
+            if (passable(grid, nx, ny) == 1) {
+                ni: i32 = ny * W + nx
+                cost: i32 = dist[best_u] + step_cost(grid, nx, ny)
+                if (cost < dist[ni]) {
+                    dist[ni] = cost
+                    parent[ni] = best_u
+                }
+            }
+        }
+    }
+
+    ret dist[goal]
+}
+
+// Calculate the total cost along parent links
+fn path_cost(grid: string[], parent: array, start: i32, goal: i32) {
+    cost: i32 = 0
+    i: i32 = goal
+    for (i != start && parent[i] >= 0) {
+        cx: i32 = i % W
+        cy: i32 = i / W
+        cost = cost + step_cost(grid, cx, cy)
+        i = parent[i]
+    }
+    ret cost
+}
+
+// Display the maze with the found path overlaid
+fn show_path(grid: string[], parent: array, start: i32, goal: i32) {
+    // Collect path set
+    path_mask: array = list(W * H)
+    for (i in 0 ... 239) {
+        path_mask[i] = 0
+    }
+
+    curr: i32 = goal
+    for (curr != start && parent[curr] >= 0) {
+        if (curr != goal) {
+            path_mask[curr] = 1
+        }
+        curr = parent[curr]
+    }
+
+    for (y in 0 ... 11) {
+        row: string = grid[y]
+        out_line: string = ""
+        for (x in 0 ... 19) {
+            idx: i32 = y * W + x
+            ch: string = row[x]
+            if (path_mask[idx] == 1) {
+                if (ch == "~") {
+                    ch = "o" // Swimming in water
+                } else {
+                    ch = "*" // Normal path
+                }
+            }
+            out_line = out_line + ch
+        }
+        print(out_line)
+    }
+}
+
+fn main() {
+    grid: string[] = split(MAZE_STR, "\n")
+    
+    start: i32 = find_char(grid, "S")
+    goal: i32 = find_char(grid, "E")
+
+    start_x: i32 = start % W
+    start_y: i32 = start / W
+    goal_x: i32 = goal % W
+    goal_y: i32 = goal / W
+
+    print(f"{W}x{H} maze, start at {start_x},{start_y} goal at {goal_x},{goal_y}")
+    print("")
+
+    // 1. BFS
+    parent_bfs: array = list(W * H)
+    for (i in 0 ... 239) {
+        parent_bfs[i] = -1
+    }
+    bfs_steps: i32 = bfs(grid, start, goal, parent_bfs)
+    bfs_c: i32 = path_cost(grid, parent_bfs, start, goal)
+    print(f"BFS: {bfs_steps} steps, cost {bfs_c} (with water at 3):")
+    show_path(grid, parent_bfs, start, goal)
+    print("")
+
+    // 2. Dijkstra
+    parent_dijk: array = list(W * H)
+    for (i in 0 ... 239) {
+        parent_dijk[i] = -1
+    }
+    dijk_cost: i32 = dijkstra(grid, start, goal, parent_dijk)
+    print(f"Dijkstra: cost {dijk_cost}:")
+    show_path(grid, parent_dijk, start, goal)
+}
+
+main()

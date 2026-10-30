@@ -12,6 +12,7 @@ It is fast to write, fast to run, and can run anywhere.
     * [Technical Intro (for nerds)](#technical-intro-for-nerds)
     * [Variables](#variables)
         + [Numbers and Strings](#numbers-and-strings)
+        + [Monitor](#monitor)
     * [Types](#types)
         + [Primitives](#primitive-types)
         + [Structs](#structs)
@@ -37,7 +38,6 @@ It is fast to write, fast to run, and can run anywhere.
     * [Functions](#functions)
         - [Passing own types](#passing-own-types)
     * [Scope & Modules](#scope-modules)
-    * [Memory Management - Garbage Collection](#memory-management)
     * [Import & Module Path](#import)
     * [C Interoperability Foreign Function Interface (FFI)](#c-interoperability-foreign-function-interface-ffi)
         + [Source example.mylo](#source-examplemylo)
@@ -53,29 +53,73 @@ It is fast to write, fast to run, and can run anywhere.
 
 <a name="technical-intro-for-nerds"></a>
 ## Technical Intro (for nerds)
-Mylo uses a high-level syntax like Python or Javascript, but is *Gradually Typed*. Code
+Mylo uses a high-level syntax like Python or Javascript. Code
 is compiled to a virtual machine (VM), and it is executed on any platform with Mylo installed. Mylo also
 supports compiling to a binary, with embedded VM code, as well as interfacing with native libraries.
 
 <a name="variables"></a>
-## Variables
-<a name="numbers-and-strings"></a>
-### Numbers and Strings
-Mylo is gradually typed, but types are inferred for numbers, strings, bools, enums, maps and lists. Here is how to define variables.
+## Variables & Scoping
+
+Mylo is strictly and statically typed. All variable declarations require an explicit type annotation and there is no type guessing.
+
+### Declaration Syntax
+Variables are declared by specifying the name, a colon `:`, the type, and an initial value:
+
 ```javascript
-var a_number = 42
-var a_string = "Hi"
-```
-Mylo handles variable overrides for you, so this is ok:
-```javascript
-var my_var = 40
-// This is a comment by the way. Below we override my_var with a string.
-my_var = "Oh no!"
+a_number: i32 = 42
+a_string: string = "Hi"
 ```
 
-You can define specific types like this:
+### Strict Typing Rules
+1. **Mandatory Type Annotations (No Guessing):**
+   Attempting to assign to an undeclared variable without a type annotation is a compile-time error:
+   ```javascript
+   x = 8 // Compiler Error: what is x?
+   ```
+2. **No Redefinition in the Same Scope:**
+   Declaring a variable name that already exists in the current scope is prohibited:
+   ```javascript
+   x: string = "foo"
+   x: u32 = 4 // Compiler Error: redefinition of 'x' in the same scope
+   ```
+3. **No Type Mutation:**
+   Variables cannot change their type. Assigning a value of a different type to an existing variable is a compile-time error:
+   ```javascript
+   x: string = "foo"
+   x = 4 // Compiler Error: cannot assign i32 to string
+   ```
+4. **Lexical Block Scoping:**
+   Variables declared inside a block `{ ... }` exist only within that scope. Referencing an out-of-scope variable causes a compile-time error:
+   ```javascript
+   {
+       x: u8 = 5
+   }
+   print(x) // Compiler Error: 'x' does not exist anymore
+   ```
+
+
+## Monitor
+
+You can view the current state of the memory, and memory arenas that have been allocated with `monitor()`:
+
 ```javascript
-var my_int: i32 = 50
+a: i32 = 3
+b: str = "Hello World"
+monitor()
+```
+
+Output:
+```bash
+  Memory Monitor                                                                                                                                                                                                                                                                                                          
+  Arenas                                                                                                                                                                                                                                                                                                                  
+  Current Arena: 0, Head: 0 / 1048576
+
+   Globals                                                                                                                                                                                                                                                                                                                
+  a: 3
+  b: Hello World
+
+   Locals (Frame #0)                                                                                                                                                                                                                                                                                                      
+  (None)
 ```
 
 <a name="types"></a>
@@ -87,16 +131,27 @@ precise binary layouts, and seamless interoperability with C functions.
 <a name="primitives"></a>
 ### Primitive Types
 
-| Type   | Description              | Size (Bytes) | C Equivalent    |
-|:-------|:-------------------------|:-------------|:----------------|
-| `num`  | Standard Number (Double) | 8            | `double`        |
-| `bool` | Boolean (0 or 1)         | 1            | `unsigned char` |
-| `byte` | Unsigned Byte            | 1            | `unsigned char` |
-| `i16`  | 16-bit Signed Integer    | 2            | `short`         |
-| `i32`  | 32-bit Signed Integer    | 4            | `int`           |
-| `i64`  | 64-bit Signed Integer    | 8            | `long long`     |
-| `f32`  | 32-bit Floating Point    | 4            | `float`         |
-| `str`  | String                   | -            | `char*`         |
+| Type     | Description                | Size (Bytes) | C Equivalent    |
+|:---------|:---------------------------|:-------------|:----------------|
+| `u8`     | 8-bit Unsigned Integer     | 1            | `unsigned char` |
+| `u16`    | 16-bit Unsigned Integer    | 2            | `uint16_t`      |
+| `u32`    | 32-bit Unsigned Integer    | 4            | `uint32_t`      |
+| `u64`    | 64-bit Unsigned Integer    | 8            | `uint64_t`      |
+| `i8`     | 8-bit Signed Integer       | 1            | `int8_t`        |
+| `i16`    | 16-bit Signed Integer      | 2            | `int16_t`       |
+| `i32`    | 32-bit Signed Integer      | 4            | `int32_t`       |
+| `i64`    | 64-bit Signed Integer      | 8            | `int64_t`       |
+| `f16`    | 16-bit Half-Precision Float| 2            | `uint16_t`      |
+| `f32`    | 32-bit Floating Point      | 4            | `float`         |
+| `f64`    | 64-bit Floating Point      | 8            | `double`        |
+| `string` | UTF-8 String (or `str`)    | -            | `char*`         |
+| `struct` | User-defined Struct type   | -            | `void*`         |
+| `enum`   | User-defined Enum type     | -            | `int`           |
+| `array`  | Array (or typed `T[]`)     | -            | `void*`         |
+| `map`    | Hash Map / Dictionary      | -            | `void*`         |
+| `bool`   | Boolean (0 or 1)           | 1            | `unsigned char` |
+
+> **Note:** The `num` type has been completely removed in favor of explicit signed, unsigned, and floating point numeric types.
 
 #### Variable Annotations
 
@@ -104,8 +159,8 @@ You can annotate variables to enforce types or define specific storage formats.
 
 **Standard Dynamic Variables:**
 ```javascript
-var x = 10          // Defaults to 'num' (f64)
-var list = [1, 2]   // Defaults to generic list of 'num'
+x: i32 = 10          // Defaults to 'num' (f64)
+list: i32[] = [1, 2]   // Defaults to generic list of 'num'
 ```
 
 **Typed Arrays:**
@@ -113,13 +168,13 @@ To create a compact, typed array (packed binary data), use the `[]` syntax in th
 
 ```javascript
 // 32-bit Integer Array (Compact Storage)
-var counts: i32[] = [100, 200, 300]
+counts: i32[] = [100, 200, 300]
 
 // Byte Array (Buffer)
-var pixels: byte[] = [255, 0, 128, 255]
+pixels: u8[] = [255, 0, 128, 255]
 
 // Float Array (Good for Geometry/GPU data)
-var vertices: f32[] = [1.0, 0.5, -1.0]
+vertices: f32[] = [1.0, 0.5, -1.0]
 ```
 
 #### Type Behavior
@@ -136,9 +191,9 @@ The type is specified after `var` using the `:` operator. Struct fields can be o
 
 ```javascript
 struct Color {
-    var r,
-    var g,
-    var b,
+    r: i32,
+    g: i32,
+    b: i32,
     
     // You can define methods directly inside structs!
     // The first parameter is usually `self` to access the struct instance.
@@ -148,7 +203,7 @@ struct Color {
 }
 
 // Very red
-var my_colour: Color = { r=255, g=0, b=0 }
+my_colour: Color = { r=255, g=0, b=0 }
 
 // Call a method
 print(my_colour.to_grayscale())
@@ -158,13 +213,13 @@ print(my_colour.to_grayscale())
 
 ```javascript
 struct Vec3 { 
-    var x: f32, 
-    var y: f32, 
-    var z: f32 
+    x: f32, 
+    y: f32, 
+    z: f32 
 }
 
-var pos: Vec3 = {x: 10.0, y: 20.0, z: 0.0}
-var mesh: Vec3[] = [{x: 1.0}, {x: 2.0}]
+pos: Vec3 = {x: 10.0, y: 20.0, z: 0.0}
+mesh: Vec3[] = [{x: 1.0}, {x: 2.0}]
 ```
 
 <a name="enums"></a>
@@ -177,7 +232,7 @@ enum Transport {
     bus,
     bike
 }
-var myvar = Transport::car
+myvar: Transport = Transport::car
 if (myvar == Transport::car) {
     print("He's in a car!")
 }
@@ -203,7 +258,7 @@ for (x in Transport) {
 Truth statements evaluate to 0 for false and 1 for true. These are also codified as `true` and `false`
 
 ```javascript
-var a = "foo"
+a: string = "foo"
 if (true == false) { // Never true
     // never executes
     a = "bar"
@@ -218,8 +273,8 @@ print(a)
 Arrays for string and numbers can be defined just like regular variables,
 using the `[]` syntax.
 ```javascript
-var my_list = ["a", "b", "c"]
-var my_list = [1, 2, 3]
+my_list: string[] = ["a", "b", "c"]
+my_list: i32[] = [1, 2, 3]
 ```
 
 <a name="arrays-of-structs"></a>
@@ -230,10 +285,10 @@ is not possible.
 
 ```javascript
 struct Color {
-    var rgba
+    rgba: i32
 }
 // Notice that arrays of structs need type annotation otherwise they will be Any[].
-var my_list: Color[] = [{rgba=1000}, {rgba=2000}]
+my_list: Color[] = [{rgba=1000}, {rgba=2000}]
 ```
 
 <a name="adding-to-or-concatenating-arrays"></a>
@@ -243,10 +298,10 @@ elements to be added in braces `[]`.
 
 ```javascript
 struct Color {
-    var rgba
+    rgba: i32
 }
 // Empty list of Colors
-var my_list: Color[] = []
+my_list: Color[] = []
 // Add an element
 my_list = mylist + [{rgba: 500}]
 
@@ -263,11 +318,11 @@ Elements can be sliced using the `:` operator in the index. Inclusive Slicing (l
 - `[-1]`  returning the last element.
 ```javascript
 struct Color {
-    var rgba
+    rgba: i32
 }
 
 // Start empty
-var my_list: Color[] = []
+my_list: Color[] = []
 // Put some values in
 my_list = my_list + [{rgba=500}, {rgba=400}, {rgba=300}, {rgba=700}, {rgba=900}]
 
@@ -289,7 +344,7 @@ Mylo supports vector arithmetic, allowing you to apply operations to every eleme
 You can use standard math operators (`+`, `-`, `*`, `/`, `%`) between an array and a single number (scalar).
 
 ```javascript
-var numbers = [10, 20, 30]
+numbers: i32[] = [10, 20, 30]
 
 // Addition
 for (x in numbers+5) {
@@ -297,7 +352,7 @@ for (x in numbers+5) {
 }   // [15, 25, 35]
 
 // Subtraction (Scalar - Array supported)
-var numbers = [10, 20, 30]
+numbers: i32[] = [10, 20, 30]
 
 for (x in 100-numbers) {
     print(x)
@@ -335,7 +390,7 @@ var data = b"\xFE\xFF"
 
 // Add 2 to every byte
 // Result is a number list: [256, 257]
-var result = data + 2 
+result: i32 = data + 2 
 
 print(result[0]) // 256
 ```
@@ -430,7 +485,7 @@ For loops can be range based, checked or iterated. See here:
 #### Range Based
 ```javascript
 // This is a loop to count from 0 to 5, and is the same as range(0,1,5) => [0,1,2,3,4,5]
-for (var x in 0...5) {
+for (x in 0...5) {
     print(x)
 }
 // You can also go the other way 5...0
@@ -474,7 +529,7 @@ for (x in my_pets) {
 #### Forever
 You can just keep executing a block forever, or until you break out.
 ```javascript
-var i = 0
+i: i32 = 0
 forever {
     print(i)
     i = i + 1
@@ -489,14 +544,14 @@ forever {
 You can exit a loop early or jump back and begin the next iteration with `break` and `continue`
 
 ```javascript
-for (var x in 0...5) {
+for (x in 0...5) {
     if (x == 1) {
         break
     }
     print(x)
 }
 
-for (var x in 0...100) {
+for (x in 0...100) {
     if (x < 50) {
         continue
     }
@@ -584,10 +639,10 @@ list_names(myvar0)
 Variables inside functions have their own scope unless they are passed in.
 
 ```javascript
-var x = 5
+x: i32 = 5
 
 fn foo() {
-    var x = 10
+    x: i32 = 10
     ret x
 }
 
@@ -619,44 +674,33 @@ print(MyFirstMod::a_big_number())
 print(a_big_number())
 ```
 <a name="memory-management"></a>
-## Memory Management
+## Memory Management - Arenas
 
-#### Garbage Collection in Mylo
+Mylo relies entirely on **Memory Arenas**. The garbage collector has been removed because it is slow and non-deterministic.
+Arenas provide bump-allocation speed (as fast as stack allocations) and deterministic, instant cleanup.
 
-Mylo uses a tracing **Mark-and-Sweep Garbage Collector** to manage memory automatically. This means you do not need to manually allocate or free memory; the GC runs periodically when the heap reaches a threshold capacity and cleans up any objects (Lists, Maps, Strings, Structs) that are no longer reachable from the root variables.
+### The 'main' Arena
+By default, all allocations at the global/outer scope live in the `main` arena.
 
-In **Mylo**, variables allocated within functions and loops are automatically cleaned up when they go out of scope. If they are stored in longer-lived data structures, they persist until they are no longer accessible.
-
-#### What does this mean for developers?
-
-1.  **Automatic Memory Management:** You do not have to worry about manual memory arenas, tracking allocations, or freeing memory.
-2.  **No Region Syntax:** The deprecated `region` and `region_name::variable` syntax is no longer required or supported. Just declare variables using `var` and they will be managed automatically.
-3.  **Safety:** The GC guarantees that there will be no dangling pointers or "use-after-free" errors. Accessing memory is fundamentally safe.
-
-#### Example: Temporary Variables (The "Loop" Pattern)
-
-In a game loop or server request handler, you generate temporary data that is only needed for that specific iteration.
+### Scoped Arena Syntax
+Scoped arenas are introduced using the `{[<arena_name>] ... }` syntax.
+Everything allocated within this block is placed into that arena. When the block scope exits, the arena is instantly destroyed.
 
 ```javascript
-var i = 0
+{[my_arena] // Everything in this scope is in my_arena
 
-// Infinite loop simulating a game engine
-forever {
-    if i > 2 { break }
+    x: u32 = 5
+    arr: u32[] = [1, 2, 3]
 
-    print("--- Frame " + to_string(i) + " ---")
+} // my_arena is no more! Memory is instantly reclaimed.
 
-    // Create temporary strings and arrays
-    // These will be automatically collected by the GC when they go out of scope
-    var temp_calc = [i, i * 2, i * 3]
-    var log_msg = "Processing entity " + to_string(i)
-
-    print(temp_calc)
-    print(log_msg)
-    
-    i = i + 1
-}
+print(x) // Compiler error: x does not exist outside its scope
 ```
+
+### Benefits of Arenas
+1. **Ultra Fast Allocation:** Allocation is a single pointer bump (no free-list traversal or GC tracking).
+2. **Instant Deallocation:** When the scope ends, memory is instantly reclaimed without GC pauses.
+3. **Deterministic & Safe:** Scoping ensures that out-of-scope references are caught at compile-time.
 
 <a name="import"></a>
 ## Import - Using other Mylo files
@@ -866,8 +910,8 @@ Raylib's Image object is utilised.
 ```javascript
 import C "raylib.h"
 
-// 1. Return an ID (num)
-var img_id: num = C() -> num {
+// 1. Return an ID (handle)
+img_id: i32 = C() -> i32 {
     Image raw = LoadImage("cat.png");
     // "Image" is hashed automatically
     // and is used to remember the type.
@@ -875,11 +919,11 @@ var img_id: num = C() -> num {
 }
 
 // Back in Mylo ...
-// img_id is just a handle (num), and is only meaningful to C.
+// img_id is just a handle (i32), and is only meaningful to C.
 print(img_id)
 
 // img_id is now passed back to C
-C(id: num = img_id) {
+C(id: i32 = img_id) {
     // 2. Retrieve it safely
     // Checks if ID exists AND if the stored hash matches hash("Image")
     Image* img = MYLO_RETRIEVE(id, Image, "Image");
@@ -903,9 +947,9 @@ C() {
 }
 
 // Arguments still work
-var x = 10
-C(v: num = x) {
-    printf("Value is: %f\n", v);
+x: i32 = 10
+C(v: i32 = x) {
+    printf("Value is: %d\n", v);
 }
 
 // This will now throw an error, you can't have a function 
@@ -930,25 +974,36 @@ C() {
 ### C-Function: Calling native C functions by prototype
 
 Mylo allows functions from C, such as `atoi` below, to be called
-directly by declaring them as a `cfn` (c-function). The input, and return 
+directly by declaring them as a `cfn` (c-function). The input and return 
 types must be provided.
-```
-// 'cfn' defines a c function, in this case
+```javascript
+// 'cfn' defines a C function, in this case
 // the standard library atoi. It *must* also
-// have the correct return type, otherwise it
-// will return null
-cfn atoi(x : str) -> f32
+// have the correct return type.
+cfn atoi(x: str) -> f32
 // Prints 7
 print(f"{atoi("7")}")
 ```
 
-#### Above C code generation
-The above, when compiled generates this c code:
-```
+#### Automatic Runtime Dynamic Resolution
+When running in interpreted mode (`./mylo script.mylo`), Mylo automatically attempts to resolve `cfn` symbols from the running host process and loaded libraries at compile/load time.
+- If the symbol is found (for example standard C library functions or functions linked into Mylo), Mylo dynamically binds and executes it directly in interpreter mode without requiring a compilation step.
+- If the symbol is not found (for example, functions from an external library that is not yet linked or provided via shared library), Mylo reports:
+  ```
+  error: native function <name> was not found, either build mylo with these libraries, or provide shared libraries
+  Error: This program contains Native C blocks and no shared objects are found, so it cannot be interpreted.
+  Please compile it to bytecode using: mylo --build <file>.mylo
+  ```
+  with terminal syntax highlighting.
+
+#### C Code Generation for Native Builds
+When compiled using `mylo --build script.mylo`, Mylo generates standard C wrappers:
+```c
 float __mylo_user_0(VM* vm, char* x) {
     return atoi(x);
 }
 ```
+and registers the wrapper into the native dispatch table in `out.c`.
 
 <a name="dynamically-running-native-code---c-bindings"></a>
 ## Dynamically Running Native Code - C Bindings
@@ -956,18 +1011,18 @@ float __mylo_user_0(VM* vm, char* x) {
 ### Building a Dynamic C Library, to use in the Mylo Interpreter
 
 Building the mylo application hinders the ability the test and extend an
-intpreted Mylo application. We can build a binding to allow Mylo to load
+interpreted Mylo application. We can build a binding to allow Mylo to load
 compiled C code and use them. Here is a simple example included below.
 
 You will need two files: the Library (test_lib.mylo) containing the C code, and the App (test_app.mylo) that imports and runs it.
 
 ### 1. The Library (test_lib.mylo)
 This file defines the C functionality we want to share. It is a regular Mylo file,
-but had inline C.
+but has inline C.
 
 ```javascript
-fn add(a: num, b: num) {
-    var r = C(a: num = a, b: num = b) -> num {
+fn add(a: i32, b: i32) {
+    r: i32 = C(a: i32 = a, b: i32 = b) -> i32 {
         return a + b;
     }
     ret r

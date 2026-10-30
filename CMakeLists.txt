@@ -30,6 +30,8 @@ ELSE()
     target_link_libraries(tests m)
 ENDIF()
 
+set_target_properties(mylo PROPERTIES ENABLE_EXPORTS ON)
+
 option(MODULES "Build standalone Mylo modules" OFF)
 if(MODULES)
   message(STATUS "Modules build flag enabled. Configuring plugins...")
@@ -50,6 +52,13 @@ if(MODULES)
     message(STATUS "Configuring module: Raylib")
     add_subdirectory(modules/raylib)
     add_dependencies(raylib_binding mylo)
+  endif()
+
+  # PIXEL_WINDOW Module
+  if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/modules/pixel_window")
+    message(STATUS "Configuring module: PixelWindow")
+    add_subdirectory(modules/pixel_window)
+    target_link_libraries(mylo pixel_window)
   endif()
 else()
   message(STATUS "Skipping modules. Pass -DMODULES=ON to build them.")

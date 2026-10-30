@@ -11,6 +11,7 @@ typedef struct {
     int addr;
     int type_id;
     bool is_array;
+    int scope_depth;
 } Symbol;
 
 // Local Variable Entry
@@ -19,6 +20,7 @@ typedef struct {
     int offset;
     int type_id;
     bool is_array;
+    int scope_depth;
 } LocalSymbol;
 
 typedef struct {
@@ -47,6 +49,30 @@ extern int enum_entry_count;
 #define MAX_DEBUG_SYMBOLS 4096
 extern DebugSym debug_symbols[MAX_DEBUG_SYMBOLS];
 extern int debug_symbol_count;
+
+typedef struct {
+    char name[MAX_IDENTIFIER];
+    char type[MAX_IDENTIFIER];
+} FFIArg;
+
+typedef struct {
+    int id;
+    char c_symbol_name[MAX_IDENTIFIER];
+    char func_name[MAX_IDENTIFIER];
+    char code_body[MAX_C_BLOCK_SIZE];
+    FFIArg args[MAX_FFI_ARGS];
+    int arg_count;
+    char return_type[MAX_IDENTIFIER];
+    void* native_symbol;
+    bool is_bound;
+    bool is_cfn;
+} FFIBlock;
+
+extern FFIBlock ffi_blocks[MAX_NATIVES];
+extern int ffi_count;
+extern int bound_ffi_count;
+void dynamic_cfn_invoker(VM* vm);
+extern char current_file_dir[1024];
 
 // Expose the tables to the Debugger
 extern Symbol globals[MAX_GLOBALS];

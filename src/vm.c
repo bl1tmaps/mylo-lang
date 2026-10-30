@@ -23,6 +23,7 @@
 // --- Global Instance ---
 // VM vm; // REMOVED GLOBAL VM
 MyloConfigType MyloConfig = {false, false, false, NULL, NULL, NULL};
+char mylo_exe_dir[1024] = ".";
 
 // --- Opcodes String Representation ---
 const char *OP_NAMES[] = {
@@ -51,7 +52,8 @@ const char *OP_NAMES[] = {
     "AND",
     "RANGE","SCOPE_ENTER", "SCOPE_EXIT",
     "DEBUGGER",
-    "PSH_ENUM"
+    "PSH_ENUM",
+    "CAST_ARR"
 };
 
 
@@ -93,13 +95,20 @@ void mylo_runtime_error(VM* vm, const char* fmt, ...) {
 
 int get_type_size(int heap_type) {
     switch(heap_type) {
+        case TYPE_U8:
+        case TYPE_I8:
         case TYPE_BYTES:
+        case TYPE_BOOL:
         case TYPE_BOOL_ARRAY: return 1;
-        case TYPE_I16_ARRAY:
-        case TYPE_F16_ARRAY:  return 2;
-        case TYPE_I32_ARRAY:
-        case TYPE_F32_ARRAY:  return 4;
-        case TYPE_I64_ARRAY:
+        case TYPE_U16:
+        case TYPE_I16:
+        case TYPE_F16:        return 2;
+        case TYPE_U32:
+        case TYPE_I32:
+        case TYPE_F32:        return 4;
+        case TYPE_U64:
+        case TYPE_I64:
+        case TYPE_F64:
         default: return 8;
     }
 }
@@ -168,88 +177,68 @@ void vm_free_ref(VM* vm, int id) {
     }
 }
 
+void init_arena(VM* vm, int id) {
+    if (id < 0 || id >= MAX_ARENAS) return;
+
+    vm->arenas[id].generation = (vm->arenas[id].generation + 1) & 0x3FFF;
+    if (vm->arenas[id].generation == 0) vm->arenas[id].generation = 1;
+
+    if (vm->arenas[id].memory == NULL) {
+        vm->arenas[id].capacity = 1048576; // 1M elements initial
+        vm->arenas[id].memory = (double*)calloc(vm->arenas[id].capacity, sizeof(double));
+        vm->arenas[id].types = (int*)calloc(vm->arenas[id].capacity, sizeof(int));
+    }
+
+    vm->arenas[id].head = 0;
+    vm->arenas[id].active = true;
+
+    if (!vm->arenas[id].memory || !vm->arenas[id].types) {
+        fprintf(stderr, "Critical: Failed to allocate Arena %d\n", id);
+        mylo_exit(1);
+    }
+}
+
+void free_arena(VM* vm, int id) {
+    if (id < 0 || id >= MAX_ARENAS) return;
+    if (vm->arenas[id].memory) {
+        free(vm->arenas[id].memory);
+        vm->arenas[id].memory = NULL;
+    }
+    if (vm->arenas[id].types) {
+        free(vm->arenas[id].types);
+        vm->arenas[id].types = NULL;
+    }
+    vm->arenas[id].active = false;
+    vm->arenas[id].head = 0;
+    vm->arenas[id].capacity = 0;
+}
+
+double* vm_resolve_ptr(VM* vm, double ptr_val) {
+    int id = UNPACK_ARENA(ptr_val);
+    int offset = UNPACK_OFFSET(ptr_val);
+    int gen = UNPACK_GEN(ptr_val);
+
+    if (id < 0 || id >= MAX_ARENAS) return NULL;
+    if (!vm->arenas[id].active) return NULL;
+    if (vm->arenas[id].generation != gen) return NULL;
+    if (offset < 0 || offset >= vm->arenas[id].capacity) return NULL;
+    return &vm->arenas[id].memory[offset];
+}
+
 double* vm_resolve_ptr_safe(VM* vm, double ptr_val) {
+    return vm_resolve_ptr(vm, ptr_val);
+}
+
+int* vm_resolve_type(VM* vm, double ptr_val) {
+    int id = UNPACK_ARENA(ptr_val);
     int offset = UNPACK_OFFSET(ptr_val);
-    if (offset < 0 || offset >= vm->heap.capacity) return NULL;
-    if (vm->heap.memory[offset] == NULL) return NULL;
-    return vm->heap.memory[offset];
-}
+    int gen = UNPACK_GEN(ptr_val);
 
-// --- GC Management ---
-
-static void mark_object(VM* vm, double ptr_val) {
-    int offset = UNPACK_OFFSET(ptr_val);
-    if (offset < 0 || offset >= vm->heap.capacity) return;
-    if (vm->heap.memory[offset] == NULL || vm->heap.marked[offset]) return;
-    
-    vm->heap.marked[offset] = 1;
-    
-    // Trace children if it's an array or map
-    double* base = vm->heap.memory[offset];
-    int obj_type = (int)base[HEAP_OFFSET_TYPE];
-    
-    if (obj_type == TYPE_ARRAY) {
-        int len = (int)base[HEAP_OFFSET_LEN];
-        for (int i=0; i<len; i++) {
-            if (vm->heap.types[offset][HEAP_HEADER_ARRAY + i] == T_OBJ) {
-                mark_object(vm, base[HEAP_HEADER_ARRAY + i]);
-            }
-        }
-    } else if (obj_type == TYPE_MAP) {
-        int cap = (int)base[HEAP_OFFSET_CAP];
-        int header_offset = HEAP_HEADER_MAP;
-        for (int i = 0; i < cap; i++) {
-            int key_type = vm->heap.types[offset][header_offset + (i * 2)];
-            int val_type = vm->heap.types[offset][header_offset + (i * 2) + 1];
-            double key = base[header_offset + (i * 2)];
-            double val = base[header_offset + (i * 2) + 1];
-            
-            if (key_type == T_OBJ && key != 0.0) mark_object(vm, key);
-            if (val_type == T_OBJ && val != 0.0) mark_object(vm, val);
-        }
-    } else if (obj_type >= 0) {
-        // It's a struct! struct_id is obj_type, size is at base[1]
-        int len = (int)base[1];
-        for (int i = 0; i < len; i++) {
-            if (vm->heap.types[offset][2 + i] == T_OBJ) {
-                mark_object(vm, base[2 + i]);
-            }
-        }
-    }
-}
-
-void gc_mark(VM* vm) {
-    // 1. Mark Stack
-    for (int i = 0; i <= vm->sp; i++) {
-        if (vm->stack_types[i] == T_OBJ) mark_object(vm, vm->stack[i]);
-    }
-    // 2. Mark Globals
-    if (vm->global_symbol_count > 0) {
-        for (int i = 0; i < MAX_GLOBALS; i++) {
-            if (vm->global_types[i] == T_OBJ) mark_object(vm, vm->globals[i]);
-        }
-    }
-}
-
-void gc_sweep(VM* vm) {
-    for (int i = 0; i < vm->heap.capacity; i++) {
-        if (vm->heap.memory[i] != NULL) {
-            if (!vm->heap.marked[i]) {
-                free(vm->heap.memory[i]);
-                free(vm->heap.types[i]);
-                vm->heap.memory[i] = NULL;
-                vm->heap.types[i] = NULL;
-                vm->heap.sizes[i] = 0;
-                vm->heap.count--;
-            }
-        }
-        vm->heap.marked[i] = 0; // Clear mark bits for next GC
-    }
-}
-
-void gc_collect(VM* vm) {
-    gc_mark(vm);
-    gc_sweep(vm);
+    if (id < 0 || id >= MAX_ARENAS) return NULL;
+    if (!vm->arenas[id].active) return NULL;
+    if (vm->arenas[id].generation != gen) return NULL;
+    if (offset < 0 || offset >= vm->arenas[id].capacity) return NULL;
+    return &vm->arenas[id].types[offset];
 }
 
 void vm_cleanup(VM* vm) {
@@ -261,16 +250,7 @@ void vm_cleanup(VM* vm) {
     if (vm->global_types) { free(vm->global_types); vm->global_types = NULL; }
     if (vm->constants) { free(vm->constants); vm->constants = NULL; }
 
-    for (int i = 0; i < vm->heap.capacity; i++) {
-        if (vm->heap.memory[i]) {
-            free(vm->heap.memory[i]);
-            free(vm->heap.types[i]);
-        }
-    }
-    if (vm->heap.memory) free(vm->heap.memory);
-    if (vm->heap.types) free(vm->heap.types);
-    if (vm->heap.sizes) free(vm->heap.sizes);
-    if (vm->heap.marked) free(vm->heap.marked);
+    for (int i = 0; i < MAX_ARENAS; i++) free_arena(vm, i);
     if (vm->string_pool) { free(vm->string_pool); vm->string_pool = NULL; }
 
     for (int i = 0; i < ref_next_id; i++) {
@@ -283,6 +263,7 @@ void vm_cleanup(VM* vm) {
     if (vm->global_symbols) { free(vm->global_symbols); vm->global_symbols = NULL; }
     if (vm->local_symbols) { free(vm->local_symbols); vm->local_symbols = NULL; }
 }
+
 void register_stdlib(VM* vm) {
     int i = 0;
     while (std_library[i].name != NULL) {
@@ -290,13 +271,11 @@ void register_stdlib(VM* vm) {
         i++;
     }
 }
+
 void vm_init(VM* vm) {
     vm->scope_sp = 0;
-    // OPTIMIZATION: Soft Reset if VM is already initialized
-    // Instead of freeing everything and calloc-ing (zeroing) the whole heap again,
-    // we reuse the pointers and only zero-out the memory that was *used* in the last run.
+    vm->arena_sp = 0;
     if (vm->bytecode) {
-        // 1. Reset Registers & Counters
         vm->sp = -1;
         vm->ip = 0;
         vm->fp = 0;
@@ -310,46 +289,48 @@ void vm_init(VM* vm) {
         vm->local_symbol_count = 0;
         vm->cli_debug_mode = false;
         vm->last_debug_line = -1;
-        vm->dependency_count = 0; // [NEW] Reset dependencies
+        vm->dependency_count = 0;
 
-        // 2. Clear Small Buffers
         memset(vm->natives, 0, sizeof(vm->natives));
         memset(vm->globals, 0, MAX_GLOBALS * sizeof(double));
         memset(vm->global_types, 0, MAX_GLOBALS * sizeof(int));
-        // Note: Stack doesn't need explicit clearing as sp=-1 protects it,
-        // but if paranoid: memset(vm->stack, 0, STACK_SIZE * sizeof(double));
 
-        // 3. Clean up References
         for (int i = 0; i < ref_next_id; i++) {
             if (ref_store[i].is_copy && ref_store[i].ptr) free(ref_store[i].ptr);
             ref_store[i].ptr = NULL;
         }
         ref_next_id = 0;
 
-        // 4. Reset GC Heap
-        for (int i = 0; i < vm->heap.capacity; i++) {
-            if (vm->heap.memory[i]) {
-                free(vm->heap.memory[i]);
-                free(vm->heap.types[i]);
-                vm->heap.memory[i] = NULL;
-                vm->heap.types[i] = NULL;
-                vm->heap.sizes[i] = 0;
+        // Reset Arena 0 (Main Heap) - Reuse Memory!
+        if (vm->arenas[0].memory) {
+            size_t used = vm->arenas[0].head;
+            if (used > 0) {
+                memset(vm->arenas[0].memory, 0, used * sizeof(double));
+                memset(vm->arenas[0].types, 0, used * sizeof(int));
             }
+            vm->arenas[0].generation = (vm->arenas[0].generation + 1) & 0x3FFF;
+            if (vm->arenas[0].generation == 0) vm->arenas[0].generation = 1;
+            vm->arenas[0].head = 0;
+            vm->arenas[0].active = true;
+        } else {
+            init_arena(vm, 0);
         }
-        memset(vm->heap.marked, 0, vm->heap.capacity);
-        vm->heap.count = 0;
-        vm->heap.next_free = 0;
 
-        // 6. Clear Debug Symbols (Compiler re-allocates these)
+        // Free other regions
+        for (int i = 1; i < MAX_ARENAS; i++) {
+            free_arena(vm, i);
+        }
+        vm->current_arena = 0;
+        vm->arena_sp = 0;
+
         if (vm->global_symbols) { free(vm->global_symbols); vm->global_symbols = NULL; }
         if (vm->local_symbols) { free(vm->local_symbols); vm->local_symbols = NULL; }
 
         register_stdlib(vm);
-        return; // Done! Skip the heavy allocations below.
+        return;
     }
 
-    // --- Cold Start (First Run) ---
-
+    // Cold Start
     vm->bytecode = (int*)malloc(MAX_CODE * sizeof(int));
     vm->lines    = (int*)malloc(MAX_CODE * sizeof(int));
 
@@ -360,18 +341,15 @@ void vm_init(VM* vm) {
 
     vm->constants = (double*)malloc(MAX_CONSTANTS * sizeof(double));
     vm->string_pool = malloc(MAX_STRINGS * MAX_STRING_LENGTH);
-    vm->heap.capacity = 1024; // Start small, grow dynamically
-    vm->heap.memory = (double**)calloc(vm->heap.capacity, sizeof(double*));
-    vm->heap.types = (int**)calloc(vm->heap.capacity, sizeof(int*));
-    vm->heap.sizes = (int*)calloc(vm->heap.capacity, sizeof(int));
-    vm->heap.marked = (char*)calloc(vm->heap.capacity, sizeof(char));
-    vm->heap.count = 0;
-    vm->heap.next_free = 0;
+    memset(vm->arenas, 0, sizeof(vm->arenas));
+
+    init_arena(vm, 0);
+    vm->current_arena = 0;
+    vm->arena_sp = 0;
 
     if (!vm->bytecode || !vm->stack) {
         fprintf(stderr, "Critical Error: Failed to allocate VM memory\n");
         mylo_exit(1);
-
     }
 
     vm->sp = -1;
@@ -390,82 +368,34 @@ void vm_init(VM* vm) {
     vm->source_code = NULL;
     vm->cli_debug_mode = false;
     vm->last_debug_line = -1;
-    vm->dependency_count = 0; // [NEW] Initialize dependency count
+    vm->dependency_count = 0;
     memset(vm->natives, 0, sizeof(vm->natives));
     register_stdlib(vm);
 }
 
-double* vm_resolve_ptr(VM* vm, double ptr_val) {
-    int offset = UNPACK_OFFSET(ptr_val);
-    if (offset < 0 || offset >= vm->heap.capacity) {
-        RUNTIME_ERROR("Access violation: Invalid GC Pointer %d", offset);
-        return NULL;
-    }
-    if (vm->heap.memory[offset] == NULL) {
-        RUNTIME_ERROR("Access violation: GC Object %d is freed", offset);
-        return NULL;
-    }
-    return vm->heap.memory[offset];
-}
-
-int* vm_resolve_type(VM* vm, double ptr_val) {
-    int offset = UNPACK_OFFSET(ptr_val);
-    if (offset < 0 || offset >= vm->heap.capacity) return NULL;
-    if (vm->heap.memory[offset] == NULL) return NULL;
-    return vm->heap.types[offset];
-}
-
 double heap_alloc(VM* vm, int size) {
-    if (vm->heap.count >= vm->heap.capacity * 0.75) { // Trigger GC at 75% capacity
-        gc_collect(vm);
-        if (vm->heap.count >= vm->heap.capacity * 0.75) {
-            // Still full after GC? Grow the heap!
-            int new_cap = vm->heap.capacity * 2;
-            vm->heap.memory = (double**)realloc(vm->heap.memory, new_cap * sizeof(double*));
-            vm->heap.types = (int**)realloc(vm->heap.types, new_cap * sizeof(int*));
-            vm->heap.sizes = (int*)realloc(vm->heap.sizes, new_cap * sizeof(int));
-            vm->heap.marked = (char*)realloc(vm->heap.marked, new_cap * sizeof(char));
-            
-            // Zero-out the new memory
-            for (int i = vm->heap.capacity; i < new_cap; i++) {
-                vm->heap.memory[i] = NULL;
-                vm->heap.types[i] = NULL;
-                vm->heap.sizes[i] = 0;
-                vm->heap.marked[i] = 0;
-            }
-            vm->heap.capacity = new_cap;
+    int id = vm->current_arena;
+    if (id < 0 || id >= MAX_ARENAS) id = 0;
+    if (!vm->arenas[id].active) init_arena(vm, id);
+
+    if (vm->arenas[id].head + size >= vm->arenas[id].capacity) {
+        int new_cap = vm->arenas[id].capacity * 2;
+        if (new_cap < vm->arenas[id].head + size + 1024) new_cap = vm->arenas[id].head + size + 1024;
+        double* new_mem = (double*)realloc(vm->arenas[id].memory, new_cap * sizeof(double));
+        int* new_types = (int*)realloc(vm->arenas[id].types, new_cap * sizeof(int));
+        if (!new_mem || !new_types) {
+            fprintf(stderr, "Critical: Heap Allocation Failed in Arena %d\n", id);
+            mylo_exit(1);
         }
+        memset(new_mem + vm->arenas[id].capacity, 0, (new_cap - vm->arenas[id].capacity) * sizeof(double));
+        memset(new_types + vm->arenas[id].capacity, 0, (new_cap - vm->arenas[id].capacity) * sizeof(int));
+        vm->arenas[id].memory = new_mem;
+        vm->arenas[id].types = new_types;
+        vm->arenas[id].capacity = new_cap;
     }
-    
-    // Find a free slot
-    int offset = -1;
-    for (int i = vm->heap.next_free; i < vm->heap.capacity; i++) {
-        if (vm->heap.memory[i] == NULL) {
-            offset = i;
-            break;
-        }
-    }
-    if (offset == -1) {
-        for (int i = 0; i < vm->heap.next_free; i++) {
-            if (vm->heap.memory[i] == NULL) {
-                offset = i;
-                break;
-            }
-        }
-    }
-    
-    if (offset == -1) {
-        printf("Error: GC Heap Overflow (Fragmentation)!\n");
-        mylo_exit(1);
-    }
-    
-    vm->heap.next_free = (offset + 1) % vm->heap.capacity;
-    vm->heap.memory[offset] = (double*)calloc(size, sizeof(double));
-    vm->heap.types[offset] = (int*)calloc(size, sizeof(int));
-    vm->heap.sizes[offset] = size;
-    vm->heap.count++;
-    
-    return PACK_PTR(offset);
+    int offset = vm->arenas[id].head;
+    vm->arenas[id].head += size;
+    return PACK_PTR(vm->arenas[id].generation, id, offset);
 }
 
 void vm_push(VM* vm, double val, int type) {
@@ -545,10 +475,10 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem) {
         if (depth > 0) print_raw(vm, "\"");
     }
     else if (type == T_OBJ) {
-        int offset = UNPACK_OFFSET(val);
-
-        if (offset < 0 || offset >= vm->heap.capacity || vm->heap.memory[offset] == NULL) {
-            print_raw(vm, "[Freed/Invalid Object]");
+        int arena_id = UNPACK_ARENA(val);
+        int gen = UNPACK_GEN(val);
+        if (arena_id < 0 || arena_id >= MAX_ARENAS || !vm->arenas[arena_id].active || vm->arenas[arena_id].generation != gen) {
+            print_raw(vm, "[Stale Object Ref]");
             return;
         }
 
@@ -591,7 +521,7 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem) {
                 if (count > limit) print_raw(vm, ", ...");
             }
             print_raw(vm, "}");
-        } else if (obj_type == TYPE_BYTES) {
+        } else if (obj_type == TYPE_BYTES || obj_type == TYPE_U8) {
             int len = (int)base[HEAP_OFFSET_LEN];
             unsigned char* b = (unsigned char*)&base[HEAP_HEADER_ARRAY];
             print_raw(vm, "b\"");
@@ -603,18 +533,28 @@ void print_recursive(VM* vm, double val, int type, int depth, int max_elem) {
             }
             if (len > limit) print_raw(vm, "...");
             print_raw(vm, "\"");
-        } else if (obj_type <= TYPE_I16_ARRAY && obj_type >= TYPE_BOOL_ARRAY) {
+        } else if (obj_type < 0 && obj_type != TYPE_MAP && obj_type != TYPE_STRUCT && obj_type != TYPE_ENUM) {
             print_raw(vm, "[");
             int len = (int)base[HEAP_OFFSET_LEN];
             char* data = (char*)&base[HEAP_HEADER_ARRAY];
             int limit = (max_elem != -1 && len > max_elem) ? max_elem : len;
             for (int i = 0; i < limit; i++) {
                 if (i > 0) print_raw(vm, ", ");
-                if (obj_type == TYPE_I32_ARRAY) sprintf(buf, "%d", ((int*)data)[i]);
-                else if (obj_type == TYPE_F32_ARRAY) sprintf(buf, "%g", ((float*)data)[i]);
-                else if (obj_type == TYPE_I16_ARRAY) sprintf(buf, "%d", ((short*)data)[i]);
-                else if (obj_type == TYPE_I64_ARRAY) sprintf(buf, "%lld", ((long long*)data)[i]);
-                else if (obj_type == TYPE_BOOL_ARRAY) { print_raw(vm, ((unsigned char*)data)[i] ? "true" : "false"); continue; }
+                if (obj_type == TYPE_BOOL || obj_type == TYPE_BOOL_ARRAY) {
+                    print_raw(vm, ((unsigned char*)data)[i] ? "true" : "false");
+                    continue;
+                }
+                else if (obj_type == TYPE_I8) sprintf(buf, "%d", ((signed char*)data)[i]);
+                else if (obj_type == TYPE_U16) sprintf(buf, "%u", ((unsigned short*)data)[i]);
+                else if (obj_type == TYPE_I16 || obj_type == TYPE_I16_ARRAY) sprintf(buf, "%d", ((short*)data)[i]);
+                else if (obj_type == TYPE_U32) sprintf(buf, "%u", ((unsigned int*)data)[i]);
+                else if (obj_type == TYPE_I32 || obj_type == TYPE_I32_ARRAY) sprintf(buf, "%d", ((int*)data)[i]);
+                else if (obj_type == TYPE_U64) sprintf(buf, "%llu", ((unsigned long long*)data)[i]);
+                else if (obj_type == TYPE_I64 || obj_type == TYPE_I64_ARRAY) sprintf(buf, "%lld", ((long long*)data)[i]);
+                else if (obj_type == TYPE_F16 || obj_type == TYPE_F16_ARRAY) sprintf(buf, "%g", (double)((short*)data)[i]);
+                else if (obj_type == TYPE_F32 || obj_type == TYPE_F32_ARRAY) sprintf(buf, "%g", ((float*)data)[i]);
+                else if (obj_type == TYPE_F64) sprintf(buf, "%g", ((double*)data)[i]);
+                else sprintf(buf, "%g", ((double*)data)[i]);
                 print_raw(vm, buf);
             }
             if (len > limit) print_raw(vm, ", ...");
@@ -879,14 +819,30 @@ static void broadcast_math(VM* vm, int op, double obj_val, double scalar_val, in
     for(int i=0; i<len; i++) {
         double el = 0;
         int elType = T_NUM;
-        if(hType == TYPE_BYTES) {
-            unsigned char* b = (unsigned char*)&base[HEAP_HEADER_ARRAY];
-            el = (double)b[i];
-        } else if (hType == TYPE_ARRAY) {
+        if (hType == TYPE_ARRAY) {
             el = base[HEAP_HEADER_ARRAY+i];
             elType = types[HEAP_HEADER_ARRAY+i];
-        } else if (hType == TYPE_I32_ARRAY) el = (double)((int*)&base[HEAP_HEADER_ARRAY])[i];
-        else if (hType == TYPE_F32_ARRAY) el = (double)((float*)&base[HEAP_HEADER_ARRAY])[i];
+        } else {
+            char* data = (char*)&base[HEAP_HEADER_ARRAY];
+            switch(hType) {
+                case TYPE_U8:
+                case TYPE_BYTES:
+                case TYPE_BOOL:
+                case TYPE_BOOL_ARRAY: el = (double)((unsigned char*)data)[i]; break;
+                case TYPE_I8:         el = (double)((signed char*)data)[i]; break;
+                case TYPE_U16:        el = (double)((unsigned short*)data)[i]; break;
+                case TYPE_I16:        el = (double)((short*)data)[i]; break;
+                case TYPE_F16:        el = (double)((float)((short*)data)[i]); break;
+                case TYPE_U32:        el = (double)((unsigned int*)data)[i]; break;
+                case TYPE_I32:        el = (double)((int*)data)[i]; break;
+                case TYPE_F32:        el = (double)((float*)data)[i]; break;
+                case TYPE_U64:        el = (double)((unsigned long long*)data)[i]; break;
+                case TYPE_I64:        el = (double)((long long*)data)[i]; break;
+                case TYPE_F64:        el = ((double*)data)[i]; break;
+                default:              el = ((double*)data)[i]; break;
+            }
+            elType = T_NUM;
+        }
 
         if (scalar_type == T_NUM && elType == T_NUM) {
              double lhs = obj_is_lhs ? el : scalar_val;
@@ -1035,7 +991,7 @@ static void exec_math_op(VM* vm, int op) {
                  return;
             }
             // 3. Typed Arrays
-            else if (typeA == typeB && typeA <= TYPE_I16_ARRAY && typeA >= TYPE_BOOL_ARRAY) {
+            else if (typeA == typeB && typeA < 0 && typeA != TYPE_ARRAY && typeA != TYPE_MAP && typeA != TYPE_STRUCT && typeA != TYPE_ENUM) {
                 int elem_size = get_type_size(typeA);
                 int total_len = lenA + lenB;
                 // Calculate doubles needed: header(2) + data
@@ -1254,7 +1210,19 @@ static void exec_array_op(VM* vm, int op) {
     } else if (op == OP_AGET) {
         CHECK_STACK(2);
         double key = vm_pop(vm); int kt = vm->stack_types[vm->sp+1];
-        double ptr = vm_pop(vm);
+        double ptr = vm_pop(vm); int pt = vm->stack_types[vm->sp+1];
+
+        if (pt == T_STR) {
+            const char* s = vm->string_pool[(int)ptr];
+            int len = (int)strlen(s);
+            int idx = (int)key;
+            if (idx < 0) idx += len;
+            if (idx < 0 || idx >= len) RUNTIME_ERROR("String Index OOB");
+            char ch[2] = { s[idx], '\0' };
+            int sid = make_string(vm, ch);
+            vm_push(vm, (double)sid, T_STR);
+            return;
+        }
 
         double* base = vm_resolve_ptr(vm, ptr);
         int* types = vm_resolve_type(vm, ptr);
@@ -1272,12 +1240,21 @@ static void exec_array_op(VM* vm, int op) {
                 char* data = (char*)&base[HEAP_HEADER_ARRAY];
                 double res = 0;
                 switch(type) {
-                    case TYPE_BYTES:      res = (double)((unsigned char*)data)[idx]; break;
+                    case TYPE_U8:
+                    case TYPE_BYTES:
+                    case TYPE_BOOL:
                     case TYPE_BOOL_ARRAY: res = (double)((unsigned char*)data)[idx]; break;
-                    case TYPE_I16_ARRAY:  res = (double)((short*)data)[idx]; break;
-                    case TYPE_I32_ARRAY:  res = (double)((int*)data)[idx]; break;
-                    case TYPE_F32_ARRAY:  res = (double)((float*)data)[idx]; break;
-                    case TYPE_I64_ARRAY:  res = (double)((long long*)data)[idx]; break;
+                    case TYPE_I8:         res = (double)((signed char*)data)[idx]; break;
+                    case TYPE_U16:        res = (double)((unsigned short*)data)[idx]; break;
+                    case TYPE_I16:        res = (double)((short*)data)[idx]; break;
+                    case TYPE_F16:        res = (double)((float)((short*)data)[idx]); break;
+                    case TYPE_U32:        res = (double)((unsigned int*)data)[idx]; break;
+                    case TYPE_I32:        res = (double)((int*)data)[idx]; break;
+                    case TYPE_F32:        res = (double)((float*)data)[idx]; break;
+                    case TYPE_U64:        res = (double)((unsigned long long*)data)[idx]; break;
+                    case TYPE_I64:        res = (double)((long long*)data)[idx]; break;
+                    case TYPE_F64:        res = ((double*)data)[idx]; break;
+                    default:              res = ((double*)data)[idx]; break;
                 }
                 vm_push(vm, res, T_NUM);
             }
@@ -1301,10 +1278,16 @@ static void exec_array_op(VM* vm, int op) {
     } else if (op == OP_ALEN) {
         CHECK_STACK(1);
         double ptr = vm_pop(vm);
-        double* base = vm_resolve_ptr(vm, ptr);
-        int type = (int)base[HEAP_OFFSET_TYPE];
-        if (type == TYPE_MAP) vm_push(vm, base[HEAP_OFFSET_COUNT], T_NUM);
-        else vm_push(vm, base[HEAP_OFFSET_LEN], T_NUM);
+        int pt = vm->stack_types[vm->sp+1];
+        if (pt == T_STR) {
+            const char* s = vm->string_pool[(int)ptr];
+            vm_push(vm, (double)strlen(s), T_NUM);
+        } else {
+            double* base = vm_resolve_ptr(vm, ptr);
+            int type = (int)base[HEAP_OFFSET_TYPE];
+            if (type == TYPE_MAP) vm_push(vm, base[HEAP_OFFSET_COUNT], T_NUM);
+            else vm_push(vm, base[HEAP_OFFSET_LEN], T_NUM);
+        }
     } else if (op == OP_ASET) {
         CHECK_STACK(3);
         double val = vm_pop(vm); int vt = vm->stack_types[vm->sp+1];
@@ -1361,11 +1344,21 @@ static void exec_array_op(VM* vm, int op) {
              int idx = (int)key;
              char* data = (char*)&base[HEAP_HEADER_ARRAY];
              switch(type) {
-                case TYPE_I32_ARRAY: ((int*)data)[idx] = (int)val; break;
-                case TYPE_F32_ARRAY: ((float*)data)[idx] = (float)val; break;
-                case TYPE_I16_ARRAY: ((short*)data)[idx] = (short)val; break;
-                case TYPE_I64_ARRAY: ((long long*)data)[idx] = (long long)val; break;
+                case TYPE_U8:
+                case TYPE_BYTES:
+                case TYPE_BOOL:
                 case TYPE_BOOL_ARRAY: ((unsigned char*)data)[idx] = (unsigned char)val; break;
+                case TYPE_I8:         ((signed char*)data)[idx] = (signed char)val; break;
+                case TYPE_U16:        ((unsigned short*)data)[idx] = (unsigned short)val; break;
+                case TYPE_I16:        ((short*)data)[idx] = (short)val; break;
+                case TYPE_F16:        ((short*)data)[idx] = (short)val; break;
+                case TYPE_U32:        ((unsigned int*)data)[idx] = (unsigned int)val; break;
+                case TYPE_I32:        ((int*)data)[idx] = (int)val; break;
+                case TYPE_F32:        ((float*)data)[idx] = (float)val; break;
+                case TYPE_U64:        ((unsigned long long*)data)[idx] = (unsigned long long)val; break;
+                case TYPE_I64:        ((long long*)data)[idx] = (long long)val; break;
+                case TYPE_F64:        ((double*)data)[idx] = (double)val; break;
+                default:              ((double*)data)[idx] = (double)val; break;
              }
         }
         vm_push(vm, val, vt);
@@ -1394,12 +1387,21 @@ static void exec_array_op(VM* vm, int op) {
         for(int i = count - 1; i >= 0; i--) {
             double val = vm->stack[vm->sp--];
             switch(type_id) {
+                case TYPE_U8:
                 case TYPE_BYTES:
+                case TYPE_BOOL:
                 case TYPE_BOOL_ARRAY: data_ptr[i] = (unsigned char)val; break;
-                case TYPE_I16_ARRAY: ((short*)data_ptr)[i] = (short)val; break;
-                case TYPE_I32_ARRAY: ((int*)data_ptr)[i] = (int)val; break;
-                case TYPE_F32_ARRAY: ((float*)data_ptr)[i] = (float)val; break;
-                case TYPE_I64_ARRAY: ((long long*)data_ptr)[i] = (long long)val; break;
+                case TYPE_I8:         ((signed char*)data_ptr)[i] = (signed char)val; break;
+                case TYPE_U16:        ((unsigned short*)data_ptr)[i] = (unsigned short)val; break;
+                case TYPE_I16:        ((short*)data_ptr)[i] = (short)val; break;
+                case TYPE_F16:        ((short*)data_ptr)[i] = (short)val; break;
+                case TYPE_U32:        ((unsigned int*)data_ptr)[i] = (unsigned int)val; break;
+                case TYPE_I32:        ((int*)data_ptr)[i] = (int)val; break;
+                case TYPE_F32:        ((float*)data_ptr)[i] = (float)val; break;
+                case TYPE_U64:        ((unsigned long long*)data_ptr)[i] = (unsigned long long)val; break;
+                case TYPE_I64:        ((long long*)data_ptr)[i] = (long long)val; break;
+                case TYPE_F64:        ((double*)data_ptr)[i] = (double)val; break;
+                default:              ((double*)data_ptr)[i] = (double)val; break;
             }
         }
         vm_push(vm, ptr, T_OBJ);
@@ -1412,6 +1414,27 @@ static void exec_slice_op(VM* vm, int op) {
         double e = vm_pop(vm);
         double s = vm_pop(vm);
         double ptr = vm_pop(vm);
+        int pt = vm->stack_types[vm->sp+1];
+
+        if (pt == T_STR) {
+            const char* str_val = vm->string_pool[(int)ptr];
+            int len = (int)strlen(str_val);
+            int start = (int)s; int end = (int)e;
+            if (start < 0) start += len;
+            if (end < 0) end += len;
+            if (start < 0) start = 0;
+            if (end >= len) end = len - 1;
+            int newlen = (end >= start) ? (end - start + 1) : 0;
+            if (start >= len) newlen = 0;
+            char sub[MAX_STRING_LENGTH];
+            if (newlen >= MAX_STRING_LENGTH) newlen = MAX_STRING_LENGTH - 1;
+            if (newlen > 0) memcpy(sub, str_val + start, newlen);
+            sub[newlen] = '\0';
+            int sid = make_string(vm, sub);
+            vm_push(vm, (double)sid, T_STR);
+            return;
+        }
+
         double* base = vm_resolve_ptr(vm, ptr);
         int* types = vm_resolve_type(vm, ptr);
         int type = (int)base[HEAP_OFFSET_TYPE];
@@ -1425,15 +1448,7 @@ static void exec_slice_op(VM* vm, int op) {
         int newlen = (end >= start) ? (end - start + 1) : 0;
         if (start >= len) newlen = 0;
 
-        if (type == TYPE_BYTES) {
-            double newptr = heap_alloc(vm, (newlen + 7) / 8 + 2);
-            double* newbase = vm_resolve_ptr(vm, newptr);
-            newbase[0] = TYPE_BYTES; newbase[1] = (double)newlen;
-            char* src = (char*)&base[HEAP_HEADER_ARRAY];
-            char* dst = (char*)&newbase[HEAP_HEADER_ARRAY];
-            if (newlen > 0) for (int i = 0; i < newlen; i++) dst[i] = src[start + i];
-            vm_push(vm, newptr, T_OBJ);
-        } else {
+        if (type == TYPE_ARRAY) {
             double newptr = heap_alloc(vm, newlen + 2);
             double* newbase = vm_resolve_ptr(vm, newptr);
             int* newtypes = vm_resolve_type(vm, newptr);
@@ -1442,6 +1457,15 @@ static void exec_slice_op(VM* vm, int op) {
                 newbase[2 + i] = base[2 + start + i];
                 newtypes[2 + i] = types[2 + start + i];
             }
+            vm_push(vm, newptr, T_OBJ);
+        } else {
+            int elem_size = get_type_size(type);
+            double newptr = heap_alloc(vm, (newlen * elem_size + 7) / 8 + 2);
+            double* newbase = vm_resolve_ptr(vm, newptr);
+            newbase[0] = (double)type; newbase[1] = (double)newlen;
+            char* src = (char*)&base[HEAP_HEADER_ARRAY];
+            char* dst = (char*)&newbase[HEAP_HEADER_ARRAY];
+            if (newlen > 0) memcpy(dst, src + start * elem_size, newlen * elem_size);
             vm_push(vm, newptr, T_OBJ);
         }
     } else if (op == OP_SLICE_SET) {
@@ -1460,24 +1484,117 @@ static void exec_slice_op(VM* vm, int op) {
         if (start < 0) start = 0; if (end >= len) end = len - 1;
         int slice_len = (end >= start) ? (end - start + 1) : 0;
 
-        if (type == TYPE_BYTES) {
-            double* vbase = vm_resolve_ptr(vm, val);
-            if ((int)vbase[0] == TYPE_BYTES) {
-                unsigned char* dst = (unsigned char*)&base[HEAP_HEADER_ARRAY];
-                unsigned char* src = (unsigned char*)&vbase[HEAP_HEADER_ARRAY];
-                int vlen = (int)vbase[1];
-                int copy_len = (slice_len < vlen) ? slice_len : vlen;
-                for(int i=0; i<copy_len; i++) dst[start+i] = src[i];
-            }
-        } else if (type == TYPE_ARRAY) {
+        if (type == TYPE_ARRAY) {
             double* vbase = vm_resolve_ptr(vm, val);
             int* vtypes = vm_resolve_type(vm, val);
-            if ((int)vbase[0] == TYPE_ARRAY) {
+            if (vbase && (int)vbase[0] == TYPE_ARRAY) {
                 int vlen = (int)vbase[1];
                 int copy_len = (slice_len < vlen) ? slice_len : vlen;
                 for(int i=0; i<copy_len; i++) {
                     base[2+start+i] = vbase[2+i];
                     types[2+start+i] = vtypes[2+i];
+                }
+            } else if (vbase) {
+                int vlen = (int)vbase[1];
+                int copy_len = (slice_len < vlen) ? slice_len : vlen;
+                int src_type = (int)vbase[0];
+                char* src = (char*)&vbase[HEAP_HEADER_ARRAY];
+                for (int i = 0; i < copy_len; i++) {
+                    double d = 0;
+                    switch (src_type) {
+                        case TYPE_U8:
+                        case TYPE_BYTES:
+                        case TYPE_BOOL:
+                        case TYPE_BOOL_ARRAY: d = (double)((unsigned char*)src)[i]; break;
+                        case TYPE_I8:         d = (double)((signed char*)src)[i]; break;
+                        case TYPE_U16:        d = (double)((unsigned short*)src)[i]; break;
+                        case TYPE_I16:        d = (double)((short*)src)[i]; break;
+                        case TYPE_F16:        d = (double)((short*)src)[i]; break;
+                        case TYPE_U32:        d = (double)((unsigned int*)src)[i]; break;
+                        case TYPE_I32:        d = (double)((int*)src)[i]; break;
+                        case TYPE_F32:        d = (double)((float*)src)[i]; break;
+                        case TYPE_U64:        d = (double)((unsigned long long*)src)[i]; break;
+                        case TYPE_I64:        d = (double)((long long*)src)[i]; break;
+                        case TYPE_F64:        d = ((double*)src)[i]; break;
+                        default:              d = ((double*)src)[i]; break;
+                    }
+                    base[2+start+i] = d;
+                    types[2+start+i] = T_NUM;
+                }
+            }
+        } else {
+            double* vbase = vm_resolve_ptr(vm, val);
+            if (vbase) {
+                int elem_size = get_type_size(type);
+                int vlen = (int)vbase[1];
+                int copy_len = (slice_len < vlen) ? slice_len : vlen;
+                char* dst = (char*)&base[HEAP_HEADER_ARRAY];
+                if ((int)vbase[0] == TYPE_ARRAY) {
+                    for (int i = 0; i < copy_len; i++) {
+                        double d = vbase[2 + i];
+                        int idx = start + i;
+                        switch (type) {
+                            case TYPE_U8:
+                            case TYPE_BYTES:
+                            case TYPE_BOOL:
+                            case TYPE_BOOL_ARRAY: ((unsigned char*)dst)[idx] = (unsigned char)d; break;
+                            case TYPE_I8:         ((signed char*)dst)[idx] = (signed char)d; break;
+                            case TYPE_U16:        ((unsigned short*)dst)[idx] = (unsigned short)d; break;
+                            case TYPE_I16:        ((short*)dst)[idx] = (short)d; break;
+                            case TYPE_F16:        ((short*)dst)[idx] = (short)d; break;
+                            case TYPE_U32:        ((unsigned int*)dst)[idx] = (unsigned int)d; break;
+                            case TYPE_I32:        ((int*)dst)[idx] = (int)d; break;
+                            case TYPE_F32:        ((float*)dst)[idx] = (float)d; break;
+                            case TYPE_U64:        ((unsigned long long*)dst)[idx] = (unsigned long long)d; break;
+                            case TYPE_I64:        ((long long*)dst)[idx] = (long long)d; break;
+                            case TYPE_F64:        ((double*)dst)[idx] = (double)d; break;
+                            default:              ((double*)dst)[idx] = d; break;
+                        }
+                    }
+                } else if ((int)vbase[0] == type) {
+                    char* src = (char*)&vbase[HEAP_HEADER_ARRAY];
+                    memcpy(dst + start * elem_size, src, copy_len * elem_size);
+                } else {
+                    char* src = (char*)&vbase[HEAP_HEADER_ARRAY];
+                    int src_type = (int)vbase[0];
+                    for (int i = 0; i < copy_len; i++) {
+                        double d = 0;
+                        switch (src_type) {
+                            case TYPE_U8:
+                            case TYPE_BYTES:
+                            case TYPE_BOOL:
+                            case TYPE_BOOL_ARRAY: d = (double)((unsigned char*)src)[i]; break;
+                            case TYPE_I8:         d = (double)((signed char*)src)[i]; break;
+                            case TYPE_U16:        d = (double)((unsigned short*)src)[i]; break;
+                            case TYPE_I16:        d = (double)((short*)src)[i]; break;
+                            case TYPE_F16:        d = (double)((short*)src)[i]; break;
+                            case TYPE_U32:        d = (double)((unsigned int*)src)[i]; break;
+                            case TYPE_I32:        d = (double)((int*)src)[i]; break;
+                            case TYPE_F32:        d = (double)((float*)src)[i]; break;
+                            case TYPE_U64:        d = (double)((unsigned long long*)src)[i]; break;
+                            case TYPE_I64:        d = (double)((long long*)src)[i]; break;
+                            case TYPE_F64:        d = ((double*)src)[i]; break;
+                            default:              d = ((double*)src)[i]; break;
+                        }
+                        int idx = start + i;
+                        switch (type) {
+                            case TYPE_U8:
+                            case TYPE_BYTES:
+                            case TYPE_BOOL:
+                            case TYPE_BOOL_ARRAY: ((unsigned char*)dst)[idx] = (unsigned char)d; break;
+                            case TYPE_I8:         ((signed char*)dst)[idx] = (signed char)d; break;
+                            case TYPE_U16:        ((unsigned short*)dst)[idx] = (unsigned short)d; break;
+                            case TYPE_I16:        ((short*)dst)[idx] = (short)d; break;
+                            case TYPE_F16:        ((short*)dst)[idx] = (short)d; break;
+                            case TYPE_U32:        ((unsigned int*)dst)[idx] = (unsigned int)d; break;
+                            case TYPE_I32:        ((int*)dst)[idx] = (int)d; break;
+                            case TYPE_F32:        ((float*)dst)[idx] = (float)d; break;
+                            case TYPE_U64:        ((unsigned long long*)dst)[idx] = (unsigned long long)d; break;
+                            case TYPE_I64:        ((long long*)dst)[idx] = (long long)d; break;
+                            case TYPE_F64:        ((double*)dst)[idx] = (double)d; break;
+                            default:              ((double*)dst)[idx] = d; break;
+                        }
+                    }
                 }
             }
         }
@@ -1489,8 +1606,8 @@ static void exec_monitor(VM* vm) {
     //printf("\n================ [ VM MONITOR ] ================\n");
     printf(UI_BG_HEADER UI_BOLD UI_FG_WHITE "  Memory Monitor" EXTEND UI_RST "\n");
 
-    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  GC Heap" EXTEND UI_RST "\n");
-    printf("  Objects: %d / %d\n", vm->heap.count, vm->heap.capacity);
+    printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  Arenas" EXTEND UI_RST "\n");
+    printf("  Current Arena: %d, Head: %d / %d\n", vm->current_arena, vm->arenas[vm->current_arena].head, vm->arenas[vm->current_arena].capacity);
 
     //printf("\n--- Globals ---\n");
     printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "\n   Globals" EXTEND UI_RST "\n");
@@ -1532,6 +1649,9 @@ static void exec_cast_op(VM* vm, int target_type, bool is_check_only) {
     int current_type = vm->stack_types[vm->sp];
     
     if (current_type == T_ENUM) {
+        if (target_type == TYPE_ENUM) {
+            return;
+        }
         if (target_type == TYPE_STR) {
             if (!is_check_only) {
                 int str_id = ((unsigned long long)val >> 16) & 0xFFFF;
@@ -1549,32 +1669,49 @@ static void exec_cast_op(VM* vm, int target_type, bool is_check_only) {
         current_type = T_NUM;
     }
 
-    if (target_type == TYPE_NUM || target_type == TYPE_I32_ARRAY || target_type == TYPE_I64_ARRAY ||
-        target_type == TYPE_I16_ARRAY || target_type == TYPE_F32_ARRAY || target_type == TYPE_BOOL_ARRAY ||
-        target_type == TYPE_BYTES) { // Added TYPE_BYTES check
+    if (target_type == TYPE_U8 || target_type == TYPE_U16 || target_type == TYPE_U32 || target_type == TYPE_U64 ||
+        target_type == TYPE_I8 || target_type == TYPE_I16 || target_type == TYPE_I32 || target_type == TYPE_I64 ||
+        target_type == TYPE_F16 || target_type == TYPE_F32 || target_type == TYPE_F64 ||
+        target_type == TYPE_BOOL || target_type == TYPE_BOOL_ARRAY || target_type == TYPE_BYTES) {
 
         if (current_type != T_NUM) RUNTIME_ERROR("Type Mismatch: Expected Number");
 
         if (!is_check_only) {
-            // Strong Casting: Truncate floats to integers for integer types
-            if (target_type == TYPE_I32_ARRAY ||
-                target_type == TYPE_I64_ARRAY ||
-                target_type == TYPE_I16_ARRAY ||
-                target_type == TYPE_BOOL_ARRAY ||
-                target_type == TYPE_BYTES) {
-
-                vm->stack[vm->sp] = floor(val);
-                }
-            // f32 and num (f64) do not need truncation, they stay as floating point
+            if (target_type == TYPE_U8 || target_type == TYPE_BYTES) {
+                vm->stack[vm->sp] = (double)((unsigned char)floor(val));
+            } else if (target_type == TYPE_U16) {
+                vm->stack[vm->sp] = (double)((unsigned short)floor(val));
+            } else if (target_type == TYPE_U32) {
+                vm->stack[vm->sp] = (double)((unsigned int)floor(val));
+            } else if (target_type == TYPE_U64) {
+                vm->stack[vm->sp] = (double)((unsigned long long)floor(val));
+            } else if (target_type == TYPE_I8) {
+                vm->stack[vm->sp] = (double)((signed char)floor(val));
+            } else if (target_type == TYPE_I16) {
+                vm->stack[vm->sp] = (double)((short)floor(val));
+            } else if (target_type == TYPE_I32) {
+                vm->stack[vm->sp] = (double)((int)floor(val));
+            } else if (target_type == TYPE_I64) {
+                vm->stack[vm->sp] = (double)((long long)floor(val));
+            } else if (target_type == TYPE_BOOL || target_type == TYPE_BOOL_ARRAY) {
+                vm->stack[vm->sp] = (val != 0.0) ? 1.0 : 0.0;
+            }
+            // f16, f32, f64 stay as floating point
         }
-        }
+    }
     else if (target_type == TYPE_STR) {
         if (current_type != T_STR) RUNTIME_ERROR("Type Mismatch: Expected String");
+    }
+    else if (target_type == TYPE_ARRAY || target_type == TYPE_MAP) {
+        if (current_type != T_OBJ) RUNTIME_ERROR("Type Mismatch: Expected Object");
     }
     else if (target_type >= 0) { // Struct ID
         if (current_type != T_OBJ) RUNTIME_ERROR("Type Mismatch: Expected Object");
         double* base = vm_resolve_ptr(vm, val);
         if (!base || (int)base[0] != target_type) RUNTIME_ERROR("Type Mismatch: Expected Struct ID %d", target_type);
+    }
+    else if (target_type == TYPE_ENUM) {
+        if (current_type != T_ENUM) RUNTIME_ERROR("Type Mismatch: Expected Enum");
     }
 }
 
@@ -1740,13 +1877,34 @@ int vm_step(VM* vm, bool debug_trace) {
             int* types = vm_resolve_type(vm, obj_val);
             int type = (int)base[0];
 
-            if (type == TYPE_ARRAY || type == TYPE_BYTES) {
+            if (type <= TYPE_ARRAY && type != TYPE_MAP) {
                 int len = (int)base[1];
                 if (idx < 0 || idx >= len) RUNTIME_ERROR("Iterator OOB");
                 if (op == OP_IT_KEY) vm_push(vm, (double)idx, T_NUM);
                 else {
-                    if (type == TYPE_BYTES) vm_push(vm, (double)((unsigned char*)&base[2])[idx], T_NUM);
-                    else vm_push(vm, base[2+idx], types[2+idx]);
+                    if (type == TYPE_ARRAY) vm_push(vm, base[2+idx], types[2+idx]);
+                    else {
+                        char* data = (char*)&base[HEAP_HEADER_ARRAY];
+                        double res = 0;
+                        switch(type) {
+                            case TYPE_U8:
+                            case TYPE_BYTES:
+                            case TYPE_BOOL:
+                            case TYPE_BOOL_ARRAY: res = (double)((unsigned char*)data)[idx]; break;
+                            case TYPE_I8:         res = (double)((signed char*)data)[idx]; break;
+                            case TYPE_U16:        res = (double)((unsigned short*)data)[idx]; break;
+                            case TYPE_I16:        res = (double)((short*)data)[idx]; break;
+                            case TYPE_F16:        res = (double)((float)((short*)data)[idx]); break;
+                            case TYPE_U32:        res = (double)((unsigned int*)data)[idx]; break;
+                            case TYPE_I32:        res = (double)((int*)data)[idx]; break;
+                            case TYPE_F32:        res = (double)((float*)data)[idx]; break;
+                            case TYPE_U64:        res = (double)((unsigned long long*)data)[idx]; break;
+                            case TYPE_I64:        res = (double)((long long*)data)[idx]; break;
+                            case TYPE_F64:        res = ((double*)data)[idx]; break;
+                            default:              res = ((double*)data)[idx]; break;
+                        }
+                        vm_push(vm, res, T_NUM);
+                    }
                 }
             } else if (type == TYPE_MAP) {
                 int count = (int)base[HEAP_OFFSET_COUNT];
@@ -1759,18 +1917,37 @@ int vm_step(VM* vm, bool debug_trace) {
             break;
         }
 
-        // GC replaces Arenas
+        // Scoped Arenas
         case OP_NEW_ARENA: {
-            vm_push(vm, 0.0, T_NUM); // Return a dummy region ID
+            int id = -1;
+            for (int i = 1; i < MAX_ARENAS; i++) {
+                if (!vm->arenas[i].active) { id = i; break; }
+            }
+            if (id == -1) RUNTIME_ERROR("Max Regions Reached");
+            init_arena(vm, id);
+            if (vm->arena_sp < MAX_ARENAS) {
+                vm->arena_stack[vm->arena_sp++] = vm->current_arena;
+            }
+            vm->current_arena = id;
             break;
         }
         case OP_DEL_ARENA: {
-            vm_pop(vm); // Pop the region ID
-            gc_collect(vm);
+            int id = vm->current_arena;
+            if (id > 0) {
+                free_arena(vm, id);
+            }
+            if (vm->arena_sp > 0) {
+                vm->current_arena = vm->arena_stack[--vm->arena_sp];
+            } else {
+                vm->current_arena = 0;
+            }
             break;
         }
         case OP_SET_CTX: {
-            vm_pop(vm); // Pop Region ID
+            int id = (int)vm_pop(vm);
+            if (id >= 0 && id < MAX_ARENAS) {
+                vm->current_arena = id;
+            }
             break;
         }
         case OP_MONITOR: exec_monitor(vm); break;
@@ -1838,6 +2015,84 @@ int vm_step(VM* vm, bool debug_trace) {
                 enter_debugger(vm);
             }
             break;
+        case OP_CAST_ARR: {
+            int target_type = vm->bytecode[vm->ip++];
+            CHECK_STACK(1);
+            double val = vm->stack[vm->sp];
+            double* vbase = vm_resolve_ptr(vm, val);
+            if (vbase) {
+                int src_type = (int)vbase[0];
+                if (src_type != target_type) {
+                    int vlen = (int)vbase[1];
+                    int elem_size = get_type_size(target_type);
+                    int doubles_needed;
+                    if (target_type == TYPE_ARRAY) {
+                        doubles_needed = vlen;
+                    } else {
+                        doubles_needed = (vlen * elem_size + 7) / 8;
+                    }
+                    double ptr = heap_alloc(vm, doubles_needed + HEAP_HEADER_ARRAY);
+                    double* base = vm_resolve_ptr(vm, ptr);
+                    int* types = vm_resolve_type(vm, ptr);
+                    vbase = vm_resolve_ptr(vm, val);
+                    base[0] = (double)target_type;
+                    base[1] = (double)vlen;
+                    char* dst = (char*)&base[HEAP_HEADER_ARRAY];
+
+                    for (int i = 0; i < vlen; i++) {
+                        double d = 0;
+                        if (src_type == TYPE_ARRAY) {
+                            d = vbase[HEAP_HEADER_ARRAY + i];
+                        } else {
+                            char* src = (char*)&vbase[HEAP_HEADER_ARRAY];
+                            switch (src_type) {
+                                case TYPE_U8:
+                                case TYPE_BYTES:
+                                case TYPE_BOOL:
+                                case TYPE_BOOL_ARRAY: d = (double)((unsigned char*)src)[i]; break;
+                                case TYPE_I8:         d = (double)((signed char*)src)[i]; break;
+                                case TYPE_U16:        d = (double)((unsigned short*)src)[i]; break;
+                                case TYPE_I16:        d = (double)((short*)src)[i]; break;
+                                case TYPE_F16:        d = (double)((short*)src)[i]; break;
+                                case TYPE_U32:        d = (double)((unsigned int*)src)[i]; break;
+                                case TYPE_I32:        d = (double)((int*)src)[i]; break;
+                                case TYPE_F32:        d = (double)((float*)src)[i]; break;
+                                case TYPE_U64:        d = (double)((unsigned long long*)src)[i]; break;
+                                case TYPE_I64:        d = (double)((long long*)src)[i]; break;
+                                case TYPE_F64:        d = ((double*)src)[i]; break;
+                                default:              d = ((double*)src)[i]; break;
+                            }
+                        }
+
+                        if (target_type == TYPE_ARRAY) {
+                            base[HEAP_HEADER_ARRAY + i] = d;
+                            types[HEAP_HEADER_ARRAY + i] = T_NUM;
+                        } else {
+                            switch (target_type) {
+                                case TYPE_U8:
+                                case TYPE_BYTES:
+                                case TYPE_BOOL:
+                                case TYPE_BOOL_ARRAY: ((unsigned char*)dst)[i] = (unsigned char)d; break;
+                                case TYPE_I8:         ((signed char*)dst)[i] = (signed char)d; break;
+                                case TYPE_U16:        ((unsigned short*)dst)[i] = (unsigned short)d; break;
+                                case TYPE_I16:        ((short*)dst)[i] = (short)d; break;
+                                case TYPE_F16:        ((short*)dst)[i] = (short)d; break;
+                                case TYPE_U32:        ((unsigned int*)dst)[i] = (unsigned int)d; break;
+                                case TYPE_I32:        ((int*)dst)[i] = (int)d; break;
+                                case TYPE_F32:        ((float*)dst)[i] = (float)d; break;
+                                case TYPE_U64:        ((unsigned long long*)dst)[i] = (unsigned long long)d; break;
+                                case TYPE_I64:        ((long long*)dst)[i] = (long long)d; break;
+                                case TYPE_F64:        ((double*)dst)[i] = (double)d; break;
+                                default:              ((double*)dst)[i] = d; break;
+                            }
+                        }
+                    }
+                    vm->stack[vm->sp] = ptr;
+                    vm->stack_types[vm->sp] = T_OBJ;
+                }
+            }
+            break;
+        }
     }
     return op;
 }
@@ -1926,7 +2181,6 @@ bool load_self_contained(VM* vm, const char* exe_path) {
             void* lib = load_library(deps[i].name);
 
             if (!lib) {
-                extern char mylo_exe_dir[1024];
                 char exe_path[1024];
                 const char* clean_name = deps[i].name;
 
@@ -1984,6 +2238,10 @@ void get_lib_name(char* out, const char* base_name) {
 }
 
 void* load_library(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    fclose(f);
+
 #ifdef _WIN32
     HMODULE h = LoadLibraryA(path);
     if (!h)
@@ -2001,8 +2259,16 @@ void* load_library(const char* path) {
 
 void* get_symbol(void* handle, const char* symbol) {
 #ifdef _WIN32
+    if (!handle) handle = GetModuleHandle(NULL);
     return (void*)GetProcAddress((HMODULE)handle, symbol);
 #else
+    if (!handle) {
+#ifdef RTLD_DEFAULT
+        handle = RTLD_DEFAULT;
+#else
+        handle = ((void*)0);
+#endif
+    }
     return dlsym(handle, symbol);
 #endif
 }

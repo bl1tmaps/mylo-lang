@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -30,6 +31,7 @@
 // HTTP Display Includes
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 // #include <winsock2.h> // This was causing a redefinition failure on MSVC
@@ -305,9 +307,9 @@ void std_type(VM *vm) {
 
   int str_id = -1;
   if (type == T_NUM) {
-    str_id = make_string(vm, "num");
+    str_id = make_string(vm, "i32");
   } else if (type == T_STR) {
-    str_id = make_string(vm, "str");
+    str_id = make_string(vm, "string");
   } else if (type == T_ENUM) {
     // Shift right 32 bits to grab the Type Name string ID!
     unsigned long long packed = (unsigned long long)val;
@@ -342,6 +344,36 @@ void std_type(VM *vm) {
   vm_push(vm, (double)str_id, T_STR);
 }
 
+static inline bool is_any_array_type(int type) {
+  return (type <= TYPE_ARRAY && type != TYPE_MAP && type != TYPE_STR && type != TYPE_VOID);
+}
+
+static inline double get_array_element(double *base, int *types, int type, int i, int *out_type) {
+  if (type == TYPE_ARRAY) {
+    if (out_type && types) *out_type = types[HEAP_HEADER_ARRAY + i];
+    return base[HEAP_HEADER_ARRAY + i];
+  }
+  if (out_type) *out_type = T_NUM;
+  char *data = (char *)&base[HEAP_HEADER_ARRAY];
+  switch (type) {
+    case TYPE_U8:
+    case TYPE_BYTES:
+    case TYPE_BOOL:
+    case TYPE_BOOL_ARRAY: return (double)((unsigned char *)data)[i];
+    case TYPE_I8:         return (double)((signed char *)data)[i];
+    case TYPE_U16:        return (double)((unsigned short *)data)[i];
+    case TYPE_I16:        return (double)((short *)data)[i];
+    case TYPE_F16:        return (double)((float)((short *)data)[i]);
+    case TYPE_U32:        return (double)((unsigned int *)data)[i];
+    case TYPE_I32:        return (double)((int *)data)[i];
+    case TYPE_F32:        return (double)((float *)data)[i];
+    case TYPE_U64:        return (double)((unsigned long long *)data)[i];
+    case TYPE_I64:        return (double)((long long *)data)[i];
+    case TYPE_F64:        return ((double *)data)[i];
+    default:              return ((double *)data)[i];
+  }
+}
+
 void std_len(VM *vm) {
   double val = vm_pop(vm);
 
@@ -354,8 +386,7 @@ void std_len(VM *vm) {
 
     int type = (int)base[HEAP_OFFSET_TYPE];
 
-    if (type == TYPE_ARRAY || type == TYPE_BYTES ||
-        (type <= TYPE_I16_ARRAY && type >= TYPE_BOOL_ARRAY)) {
+    if (is_any_array_type(type)) {
       vm_push(vm, base[HEAP_OFFSET_LEN], T_NUM);
     } else if (type == TYPE_MAP) {
       vm_push(vm, base[HEAP_OFFSET_COUNT], T_NUM);
@@ -399,12 +430,13 @@ void std_contains(VM *vm) {
 
     int objType = (int)base[HEAP_OFFSET_TYPE];
 
-    if (objType == TYPE_ARRAY) {
+    if (is_any_array_type(objType)) {
       int len = (int)base[HEAP_OFFSET_LEN];
       int found = 0;
       for (int i = 0; i < len; i++) {
-        if (types[HEAP_HEADER_ARRAY + i] == needle_type &&
-            base[HEAP_HEADER_ARRAY + i] == needle_val) {
+        int et = T_NUM;
+        double el = get_array_element(base, types, objType, i, &et);
+        if (el == needle_val && (objType != TYPE_ARRAY || et == needle_type)) {
           found = 1;
           break;
         }
@@ -601,7 +633,12 @@ void std_write_bytes(VM *vm) {
   double path_id = vm_pop(vm);
 
   double *base = vm_resolve_ptr(vm, arr_ref);
-  if (!base || (int)base[HEAP_OFFSET_TYPE] != TYPE_ARRAY) {
+  if (!base) {
+    printf("Runtime Error: write_bytes expects array\n");
+    exit(1);
+  }
+  int arr_type = (int)base[HEAP_OFFSET_TYPE];
+  if (arr_type == TYPE_STRUCT || arr_type == TYPE_MAP) {
     printf("Runtime Error: write_bytes expects array\n");
     exit(1);
   }
@@ -615,9 +652,22 @@ void std_write_bytes(VM *vm) {
     return;
   }
 
-  for (int i = 0; i < len; i++) {
-    unsigned char b = (unsigned char)base[HEAP_HEADER_ARRAY + i];
-    fputc(b, f);
+  if (arr_type == TYPE_BYTES || arr_type == TYPE_U8 || arr_type == TYPE_I8) {
+    unsigned char *raw = (unsigned char *)&base[HEAP_HEADER_ARRAY];
+    fwrite(raw, 1, len, f);
+  } else {
+    unsigned char chunk[65536];
+    int c = 0;
+    for (int i = 0; i < len; i++) {
+      chunk[c++] = (unsigned char)((int)base[HEAP_HEADER_ARRAY + i] & 0xFF);
+      if (c == (int)sizeof(chunk)) {
+        fwrite(chunk, 1, c, f);
+        c = 0;
+      }
+    }
+    if (c > 0) {
+      fwrite(chunk, 1, c, f);
+    }
   }
 
   fclose(f);
@@ -850,21 +900,12 @@ void std_where(VM *vm) {
 
     int type = (int)base[0];
 
-    if (type == TYPE_ARRAY) {
+    if (is_any_array_type(type)) {
       int len = (int)base[1];
       for (int i = 0; i < len; i++) {
-        double el = base[2 + i];
-        int et = types[2 + i];
-        if (el == item_val && et == item_type) {
-          vm_push(vm, (double)i, T_NUM);
-          return;
-        }
-      }
-    } else if (type == TYPE_BYTES) {
-      int len = (int)base[1];
-      unsigned char *b = (unsigned char *)&base[HEAP_HEADER_ARRAY];
-      for (int i = 0; i < len; i++) {
-        if ((double)b[i] == item_val) {
+        int et = T_NUM;
+        double el = get_array_element(base, types, type, i, &et);
+        if (el == item_val && (type != TYPE_ARRAY || et == item_type)) {
           vm_push(vm, (double)i, T_NUM);
           return;
         }
@@ -1051,20 +1092,22 @@ void std_list_min(VM *vm) {
   double list_ref = vm_pop(vm);
   double *base = vm_resolve_ptr(vm, list_ref);
 
-  if (vm->stack_types[vm->sp + 1] != T_OBJ || (int)base[0] != TYPE_ARRAY) {
+  if (vm->stack_types[vm->sp + 1] != T_OBJ || !base || !is_any_array_type((int)base[0])) {
     printf("Runtime Error: list_min() expects an array.\n");
     exit(1);
   }
 
+  int type = (int)base[0];
   int len = (int)base[HEAP_OFFSET_LEN];
   if (len == 0) {
     printf("Runtime Error: list_min() called on empty array.\n");
     exit(1);
   }
 
-  double min_val = base[HEAP_HEADER_ARRAY + 0];
+  int *types = vm_resolve_type(vm, list_ref);
+  double min_val = get_array_element(base, types, type, 0, NULL);
   for (int i = 1; i < len; i++) {
-    double val = base[HEAP_HEADER_ARRAY + i];
+    double val = get_array_element(base, types, type, i, NULL);
     if (val < min_val)
       min_val = val;
   }
@@ -1075,20 +1118,22 @@ void std_list_max(VM *vm) {
   double list_ref = vm_pop(vm);
   double *base = vm_resolve_ptr(vm, list_ref);
 
-  if (vm->stack_types[vm->sp + 1] != T_OBJ || (int)base[0] != TYPE_ARRAY) {
+  if (vm->stack_types[vm->sp + 1] != T_OBJ || !base || !is_any_array_type((int)base[0])) {
     printf("Runtime Error: list_max() expects an array.\n");
     exit(1);
   }
 
+  int type = (int)base[0];
   int len = (int)base[HEAP_OFFSET_LEN];
   if (len == 0) {
     printf("Runtime Error: list_max() called on empty array.\n");
     exit(1);
   }
 
-  double max_val = base[HEAP_HEADER_ARRAY + 0];
+  int *types = vm_resolve_type(vm, list_ref);
+  double max_val = get_array_element(base, types, type, 0, NULL);
   for (int i = 1; i < len; i++) {
-    double val = base[HEAP_HEADER_ARRAY + i];
+    double val = get_array_element(base, types, type, i, NULL);
     if (val > max_val)
       max_val = val;
   }
@@ -2443,6 +2488,269 @@ void std_param_filter(VM *vm) {
   vm_push(vm, res_ptr, T_OBJ);
 }
 
+void std_clock(VM *vm) {
+#ifdef _WIN32
+  static LARGE_INTEGER freq;
+  static int init = 0;
+  if (!init) { QueryPerformanceFrequency(&freq); init = 1; }
+  LARGE_INTEGER counter;
+  QueryPerformanceCounter(&counter);
+  double sec = (double)counter.QuadPart / (double)freq.QuadPart;
+  vm_push(vm, sec, T_NUM);
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  double sec = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+  vm_push(vm, sec, T_NUM);
+#endif
+}
+
+void std_abs(VM *vm) {
+  double v = vm_pop(vm);
+  vm_push(vm, fabs(v), T_NUM);
+}
+
+void std_clamp(VM *vm) {
+  double max_val = vm_pop(vm);
+  double min_val = vm_pop(vm);
+  double val = vm_pop(vm);
+  if (val < min_val) val = min_val;
+  if (val > max_val) val = max_val;
+  vm_push(vm, val, T_NUM);
+}
+
+void std_sleep(VM *vm) {
+  double ms = vm_pop(vm);
+#ifdef _WIN32
+  Sleep((DWORD)ms);
+#else
+  usleep((useconds_t)(ms * 1000));
+#endif
+  vm_push(vm, 0, T_NUM);
+}
+
+void std_ord(VM *vm) {
+  double s_val = vm_pop(vm);
+  const char *s = get_str(vm, s_val);
+  double code = (s && s[0]) ? (double)((unsigned char)s[0]) : 0.0;
+  vm_push(vm, code, T_NUM);
+}
+
+void std_chr(VM *vm) {
+  double code_val = vm_pop(vm);
+  char buf[2] = { (char)((unsigned char)code_val), '\0' };
+  int sid = make_string(vm, buf);
+  vm_push(vm, (double)sid, T_STR);
+}
+
+void std_bit_and(VM *vm) {
+  long long b = (long long)vm_pop(vm);
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(a & b), T_NUM);
+}
+
+void std_bit_or(VM *vm) {
+  long long b = (long long)vm_pop(vm);
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(a | b), T_NUM);
+}
+
+void std_bit_xor(VM *vm) {
+  long long b = (long long)vm_pop(vm);
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(a ^ b), T_NUM);
+}
+
+void std_bit_not(VM *vm) {
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(~a), T_NUM);
+}
+
+void std_bit_shl(VM *vm) {
+  long long b = (long long)vm_pop(vm);
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(a << b), T_NUM);
+}
+
+void std_bit_shr(VM *vm) {
+  long long b = (long long)vm_pop(vm);
+  long long a = (long long)vm_pop(vm);
+  vm_push(vm, (double)(a >> b), T_NUM);
+}
+
+void std_popcount(VM *vm) {
+  unsigned long long a = (unsigned long long)vm_pop(vm);
+  int count = 0;
+  while (a) {
+    count += (a & 1);
+    a >>= 1;
+  }
+  vm_push(vm, (double)count, T_NUM);
+}
+
+// --- File Streaming Support ---
+#define MAX_OPEN_FILES 64
+static FILE *open_file_table[MAX_OPEN_FILES];
+static bool file_table_init = false;
+
+static void init_file_table(void) {
+  if (!file_table_init) {
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+      open_file_table[i] = NULL;
+    }
+    file_table_init = true;
+  }
+}
+
+void std_file_open(VM *vm) {
+  init_file_table();
+  double mode_id = vm_pop(vm);
+  double path_id = vm_pop(vm);
+
+  const char *mode = get_str(vm, mode_id);
+  const char *path = get_str(vm, path_id);
+
+  int slot = -1;
+  for (int i = 0; i < MAX_OPEN_FILES; i++) {
+    if (!open_file_table[i]) {
+      slot = i;
+      break;
+    }
+  }
+
+  if (slot == -1) {
+    vm_push(vm, -1.0, T_NUM);
+    return;
+  }
+
+  FILE *f = fopen(path, mode);
+  if (!f) {
+    vm_push(vm, -1.0, T_NUM);
+    return;
+  }
+
+  open_file_table[slot] = f;
+  vm_push(vm, (double)slot, T_NUM);
+}
+
+void std_file_write(VM *vm) {
+  int content_type = vm->stack_types[vm->sp];
+  double content = vm_pop(vm);
+  double fd_val = vm_pop(vm);
+
+  int fd = (int)fd_val;
+  if (fd < 0 || fd >= MAX_OPEN_FILES || !open_file_table[fd]) {
+    printf("Runtime Error: invalid file descriptor %d in file_write\n", fd);
+    exit(1);
+  }
+
+  FILE *f = open_file_table[fd];
+  if (content_type == T_STR) {
+    const char *s = get_str(vm, content);
+    fputs(s, f);
+  } else if (content_type == T_NUM) {
+    if ((double)(int64_t)content == content) {
+      fprintf(f, "%lld", (long long)content);
+    } else {
+      fprintf(f, "%g", content);
+    }
+  } else {
+    fprintf(f, "%g", content);
+  }
+  vm_push(vm, 0.0, T_NUM);
+}
+
+void std_file_write_pixel(VM *vm) {
+  double b_val = vm_pop(vm);
+  double g_val = vm_pop(vm);
+  double r_val = vm_pop(vm);
+  double fd_val = vm_pop(vm);
+
+  int fd = (int)fd_val;
+  if (fd < 0 || fd >= MAX_OPEN_FILES || !open_file_table[fd]) {
+    printf("Runtime Error: invalid file descriptor %d in file_write_pixel\n", fd);
+    exit(1);
+  }
+
+  fprintf(open_file_table[fd], "%d %d %d ", (int)r_val, (int)g_val, (int)b_val);
+  vm_push(vm, 0.0, T_NUM);
+}
+
+void std_file_write_row(VM *vm) {
+  double count_val = vm_pop(vm);
+  double arr_ref = vm_pop(vm);
+  double fd_val = vm_pop(vm);
+
+  int fd = (int)fd_val;
+  if (fd < 0 || fd >= MAX_OPEN_FILES || !open_file_table[fd]) {
+    printf("Runtime Error: invalid file descriptor %d in file_write_row\n", fd);
+    exit(1);
+  }
+
+  double *base = vm_resolve_ptr(vm, arr_ref);
+  if (!base) {
+    printf("Runtime Error: file_write_row expects array\n");
+    exit(1);
+  }
+
+  int count = (int)count_val;
+  FILE *f = open_file_table[fd];
+  char buf[65536];
+  int pos = 0;
+  int arr_type = (int)base[HEAP_OFFSET_TYPE];
+  for (int i = 0; i < count; i++) {
+    int r = 0, g = 0, b = 0;
+    if (arr_type == TYPE_ARRAY) {
+      r = (int)base[HEAP_HEADER_ARRAY + i * 3 + 0] & 0xFF;
+      g = (int)base[HEAP_HEADER_ARRAY + i * 3 + 1] & 0xFF;
+      b = (int)base[HEAP_HEADER_ARRAY + i * 3 + 2] & 0xFF;
+    } else if (arr_type == TYPE_I32 || arr_type == TYPE_I32_ARRAY) {
+      int *data = (int *)&base[HEAP_HEADER_ARRAY];
+      r = data[i * 3 + 0] & 0xFF;
+      g = data[i * 3 + 1] & 0xFF;
+      b = data[i * 3 + 2] & 0xFF;
+    } else if (arr_type == TYPE_U8 || arr_type == TYPE_BYTES) {
+      unsigned char *data = (unsigned char *)&base[HEAP_HEADER_ARRAY];
+      r = data[i * 3 + 0];
+      g = data[i * 3 + 1];
+      b = data[i * 3 + 2];
+    } else {
+      r = (int)base[HEAP_HEADER_ARRAY + i * 3 + 0] & 0xFF;
+      g = (int)base[HEAP_HEADER_ARRAY + i * 3 + 1] & 0xFF;
+      b = (int)base[HEAP_HEADER_ARRAY + i * 3 + 2] & 0xFF;
+    }
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "%d %d %d ", r, g, b);
+    if (pos >= (int)sizeof(buf) - 64) {
+      fwrite(buf, 1, pos, f);
+      pos = 0;
+    }
+  }
+  if (pos > 0) {
+    fwrite(buf, 1, pos, f);
+  }
+  fputc('\n', f);
+  vm_push(vm, 0.0, T_NUM);
+}
+
+void std_file_flush(VM *vm) {
+  double fd_val = vm_pop(vm);
+  int fd = (int)fd_val;
+  if (fd >= 0 && fd < MAX_OPEN_FILES && open_file_table[fd]) {
+    fflush(open_file_table[fd]);
+  }
+  vm_push(vm, 0.0, T_NUM);
+}
+
+void std_file_close(VM *vm) {
+  double fd_val = vm_pop(vm);
+  int fd = (int)fd_val;
+  if (fd >= 0 && fd < MAX_OPEN_FILES && open_file_table[fd]) {
+    fclose(open_file_table[fd]);
+    open_file_table[fd] = NULL;
+  }
+  vm_push(vm, 0.0, T_NUM);
+}
+
 const StdLibDef std_library[] = {
     {"type", std_type, "str", 1, {"any"}},
     {"len", std_len, "num", 1, {"any"}},
@@ -2508,4 +2816,23 @@ const StdLibDef std_library[] = {
     {"call", std_call, "any", 2, {"str", "any"}},
     {"filter", std_filter, "arr", 2, {"arr", "str"}},
     {"param_filter", std_param_filter, "arr", 3, {"arr", "str", "any"}},
+    {"clock", std_clock, "num", 0, {NULL}},
+    {"abs", std_abs, "num", 1, {"num"}},
+    {"clamp", std_clamp, "num", 3, {"num", "num", "num"}},
+    {"sleep", std_sleep, "void", 1, {"num"}},
+    {"ord", std_ord, "num", 1, {"str"}},
+    {"chr", std_chr, "str", 1, {"num"}},
+    {"bit_and", std_bit_and, "num", 2, {"num", "num"}},
+    {"bit_or", std_bit_or, "num", 2, {"num", "num"}},
+    {"bit_xor", std_bit_xor, "num", 2, {"num", "num"}},
+    {"bit_not", std_bit_not, "num", 1, {"num"}},
+    {"bit_shl", std_bit_shl, "num", 2, {"num", "num"}},
+    {"bit_shr", std_bit_shr, "num", 2, {"num", "num"}},
+    {"popcount", std_popcount, "num", 1, {"num"}},
+    {"file_open", std_file_open, "num", 2, {"str", "str"}},
+    {"file_write", std_file_write, "void", 2, {"num", "any"}},
+    {"file_write_pixel", std_file_write_pixel, "void", 4, {"num", "num", "num", "num"}},
+    {"file_write_row", std_file_write_row, "void", 3, {"num", "arr", "num"}},
+    {"file_flush", std_file_flush, "void", 1, {"num"}},
+    {"file_close", std_file_close, "void", 1, {"num"}},
     {NULL, NULL, NULL, 0, {NULL}}};

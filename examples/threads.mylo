@@ -1,5 +1,5 @@
-// --- Threading Test Program ---
-
+// --- Threading Sample Program ---
+//
 // Mylo uses isolated memory for workers (each thread has its own VM).
 // To pass variables back and forth safely, we use the `bus`.
 
@@ -8,73 +8,74 @@ fn worker_task() {
     print("  [Worker] Thread started. Processing...")
     
     // Get input from the bus
-    var input = bus_get("job_input")
-    print(f" [Worker] Input Loops : {input}")
+    input: i32 = bus_get("job_input")
+    print(f"  [Worker] Input Loops: {input}")
 
-    // Simulate heavy work
-    var total = 0
-    for (var i in 0...input) {
+    // Perform work
+    total: i32 = 0
+    for (i in 0...input) {
         total = total + 1
     }
     
     // Store the result on the bus so the main thread can read it
     bus_set("job_result", total)
     
-    print("  [Worker] Done! Result stored.")
-    print(f" [Worker] Result Stored {total}")
+    print(f"  [Worker] Done! Result stored: {total}")
 }
 
 // 2. Main Program
-print("[Main] Initializing...")
+fn main() {
+    print("[Main] Initializing...")
 
-// Here we define the number of iterations
-var input = 100
-// Pass it to the bus
-bus_set("job_input", input)
+    // Define the number of iterations
+    input: i32 = 100
+    // Pass it to the bus
+    bus_set("job_input", input)
 
-// Spawn the worker
-// create_worker(function_name)
-// CRITICAL: The worker receives a fresh copy of all globals and strings
-// from the main VM, but subsequent changes are isolated.
-print("[Main] Spawning worker...")
-var worker_id = create_worker("worker_task")
+    // Spawn the worker
+    // create_worker(function_name)
+    // CRITICAL: The worker receives an isolated VM initialized with globals.
+    print("[Main] Spawning worker...")
+    worker_id: i32 = create_worker("worker_task")
 
-if (worker_id < 0) {
-    print("[Main] Failed to create worker!")
-} else {
+    if (worker_id < 0) {
+        print("[Main] Failed to create worker!")
+        ret
+    }
+
     print(f"[Main] Worker running (ID: {to_string(worker_id)})")
     
-    // Simple busy-wait loop to monitor status
-    // In a real app, you would do other work here while the thread runs.
-    var running = 1
+    // Simple wait loop to monitor status
+    running: i32 = 1
     forever {
         if (running != 1) {
             break 
         }
         // check_worker returns: 0 (running), 1 (complete), -1 (error)
-        var status = check_worker(worker_id)
+        status: i32 = check_worker(worker_id)
         
         if (status == 1) {
             print("[Main] Worker reported complete.")
             running = 0
         } else {
-             // Still running...
+            // Still running...
+            sleep(10)
         }
     }
     
-    // Dock the worker
-    // This joins the thread and cleans up the worker VM.
+    // Dock the worker (joins the thread and cleans up worker resources)
     print("[Main] Docking worker...")
     dock_worker(worker_id)
 
-
-    // Now we can read the values that the worker created.
-    print("[Main] Retrieving result from worker memory...")
-    var res :i32 = bus_get("job_result")
-    print(f"[Main] Calculation Result: {to_string(res)}, target: {input+1}")
+    // Now retrieve the result from the bus
+    print("[Main] Retrieving result from bus...")
+    res: i32 = bus_get("job_result")
+    print(f"[Main] Calculation Result: {to_string(res)}, Target: {input + 1}")
     if (res == (input + 1)) {
         print("[Main] SUCCESS: Threading working correctly.")
     } else {
         print("[Main] FAILURE: Result incorrect.")
     }
 }
+
+main()

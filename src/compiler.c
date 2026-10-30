@@ -15,7 +15,7 @@
 // --- Tokenizer & Structures ---
 
 typedef enum {
-    TK_FN, TK_CFN, TK_VAR, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
+    TK_FN, TK_CFN, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
     TK_ELIF,
     TK_MOD, TK_IMPORT, TK_FOREVER,
     TK_ID, TK_NUM, TK_STR, TK_RANGE,
@@ -45,7 +45,7 @@ typedef enum {
 
 // Token Names for pretty printing
 const char *TOKEN_NAMES[] = {
-    "fn", "cfn", "var", "if", "for", "ret", "print", "in", "struct", "else", "elif",
+    "fn", "cfn", "if", "for", "ret", "print", "in", "struct", "else", "elif",
     "mod", "import", "forever",
     "Identifier", "Number", "String", "Range (...)",
     "(", ")", "{", "}", "[", "]",
@@ -65,13 +65,13 @@ extern void mylo_exit(int code);
 void match(MyloTokenType t);
 
 const char *get_token_name(MyloTokenType t) {
-    if (t < 0 || t > TK_DEBUGGER) return "Unknown";
+    if (t < 0 || t > TK_AND) return "Unknown";
     return TOKEN_NAMES[t];
 }
 
 typedef struct {
     MyloTokenType type;
-    char text[MAX_IDENTIFIER];
+    char text[MAX_STRING_LENGTH];
     double val_float;
     int line;
     char *start;
@@ -79,29 +79,14 @@ typedef struct {
 } Token;
 
 typedef struct {
-    char name[MAX_IDENTIFIER];
-    char type[MAX_IDENTIFIER];
-} FFIArg;
-
-typedef struct {
-    int id;
-    char func_name[MAX_IDENTIFIER];
-    char code_body[MAX_C_BLOCK_SIZE];
-    FFIArg args[MAX_FFI_ARGS];
-    int arg_count;
-    char return_type[MAX_IDENTIFIER];
-} FFIBlock;
-
-// --- [INSERT] TypeInfo Definition ---
-typedef struct {
     int id;
     bool is_array;
 } TypeInfo;
-// ------------------------------------
 
 FFIBlock ffi_blocks[MAX_NATIVES];
 int ffi_count = 0;
 int bound_ffi_count = 0;
+char current_file_dir[1024] = ".";
 
 static char *src;
 static char *current_file_start = NULL;
@@ -133,6 +118,7 @@ typedef struct {
 LoopControl loop_stack[MAX_LOOP_NESTING];
 int loop_depth = 0;
 int current_scope_depth = 0; // <-- NEW: Compiler-wide scope tracker
+static bool last_expr_was_range = false;
 
 Symbol globals[MAX_GLOBALS];
 int global_count = 0;
@@ -150,6 +136,7 @@ struct StructDef {
     char name[MAX_IDENTIFIER];
     char fields[MAX_FIELDS][MAX_IDENTIFIER];
     int field_types[MAX_FIELDS]; // Added to store type IDs
+    bool field_is_array[MAX_FIELDS];
     int field_count;
     char methods[MAX_FIELDS][MAX_IDENTIFIER];
     int method_count;
@@ -275,12 +262,12 @@ void emit(int op) {
 }
 
 int find_local(char *name) {
-    for (int i = 0; i < local_count; i++) if (strcmp(locals[i].name, name) == 0) return i;
+    for (int i = local_count - 1; i >= 0; i--) if (strcmp(locals[i].name, name) == 0) return i;
     return -1;
 }
 
 int find_global(char *name) {
-    for (int i = 0; i < global_count; i++) if (strcmp(globals[i].name, name) == 0) return i;
+    for (int i = global_count - 1; i >= 0; i--) if (strcmp(globals[i].name, name) == 0) return i;
     return -1;
 }
 
@@ -322,19 +309,184 @@ int find_stdlib_func(char *name) {
     return -1;
 }
 
-int find_cfn(char *name) {
-    for (int i = 0; i < ffi_count; i++) {
-        if (strlen(ffi_blocks[i].func_name) > 0 && strcmp(ffi_blocks[i].func_name, name) == 0) return i;
-    }
-    return -1;
-}
-
 void get_mangled_name(char *out, char *raw_name) {
     if (strlen(current_namespace) > 0) {
         sprintf(out, "%s_%s", current_namespace, raw_name);
     } else {
         strcpy(out, raw_name);
     }
+}
+
+int find_cfn(char *name) {
+    for (int i = 0; i < ffi_count; i++) {
+        if (strlen(ffi_blocks[i].func_name) > 0 && strcmp(ffi_blocks[i].func_name, name) == 0) return i;
+    }
+    char m[MAX_IDENTIFIER * 2];
+    get_mangled_name(m, name);
+    if (strcmp(m, name) != 0) {
+        for (int i = 0; i < ffi_count; i++) {
+            if (strlen(ffi_blocks[i].func_name) > 0 && strcmp(ffi_blocks[i].func_name, m) == 0) return i;
+        }
+    }
+    for (int i = 0; i < ffi_count; i++) {
+        if (strlen(ffi_blocks[i].c_symbol_name) > 0 && strcmp(ffi_blocks[i].c_symbol_name, name) == 0) return i;
+    }
+    return -1;
+}
+
+void dynamic_cfn_invoker(VM* vm) {
+    int id = vm->bytecode[vm->ip - 1];
+    int std_count = 0;
+    while (std_library[std_count].name != NULL) std_count++;
+    int ffi_idx = id - std_count;
+    if (ffi_idx < 0 || ffi_idx >= ffi_count) {
+        printf("Runtime Error: Invalid dynamic FFI call ID %d\n", id);
+        mylo_exit(1);
+    }
+    FFIBlock *block = &ffi_blocks[ffi_idx];
+    if (!block->native_symbol) {
+        printf("Runtime Error: Native function '%s' is not bound\n", block->c_symbol_name);
+        mylo_exit(1);
+    }
+
+    double raw_args[MAX_FFI_ARGS];
+    for (int a = block->arg_count - 1; a >= 0; a--) {
+        raw_args[a] = vm_pop(vm);
+    }
+
+    uintptr_t a_int[MAX_FFI_ARGS] = {0};
+    double a_dbl[MAX_FFI_ARGS] = {0};
+    bool has_float_arg = false;
+
+    for (int a = 0; a < block->arg_count; a++) {
+        char *type = block->args[a].type;
+        if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) {
+            int sid = (int)raw_args[a];
+            const char *s = (sid >= 0 && sid < vm->str_count) ? vm->string_pool[sid] : "";
+            a_int[a] = (uintptr_t)s;
+        } else if (strcmp(type, "f32") == 0 || strcmp(type, "f64") == 0) {
+            a_dbl[a] = raw_args[a];
+            a_int[a] = (uintptr_t)(int64_t)raw_args[a];
+            has_float_arg = true;
+        } else if (strcmp(type, "bytes") == 0 || strstr(type, "[]")) {
+            void *ptr = (void*)(vm_resolve_ptr(vm, raw_args[a]) + HEAP_HEADER_ARRAY);
+            a_int[a] = (uintptr_t)ptr;
+        } else if (strcmp(type, "i32") == 0 || strcmp(type, "i64") == 0 || strcmp(type, "i16") == 0 ||
+                   strcmp(type, "i8") == 0 || strcmp(type, "u8") == 0 || strcmp(type, "u16") == 0 ||
+                   strcmp(type, "u32") == 0 || strcmp(type, "u64") == 0 || strcmp(type, "bool") == 0 ||
+                   strcmp(type, "byte") == 0 || strcmp(type, "num") == 0) {
+            a_int[a] = (uintptr_t)(int64_t)raw_args[a];
+        } else {
+            void *ptr = (void*)(vm_resolve_ptr(vm, raw_args[a]) + HEAP_HEADER_STRUCT);
+            a_int[a] = (uintptr_t)ptr;
+        }
+    }
+
+    void *fn = block->native_symbol;
+
+    if (strcmp(block->return_type, "void") == 0) {
+        if (!has_float_arg) {
+            switch (block->arg_count) {
+                case 0: ((void (*)())fn)(); break;
+                case 1: ((void (*)(uintptr_t))fn)(a_int[0]); break;
+                case 2: ((void (*)(uintptr_t, uintptr_t))fn)(a_int[0], a_int[1]); break;
+                case 3: ((void (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2]); break;
+                case 4: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3]); break;
+                case 5: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4]); break;
+                case 6: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5]); break;
+                case 7: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6]); break;
+                case 8: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7]); break;
+                case 9: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8]); break;
+                case 10: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9]); break;
+                case 11: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10]); break;
+                case 12: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11]); break;
+                case 13: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12]); break;
+                case 14: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13]); break;
+                case 15: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13], a_int[14]); break;
+                case 16: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13], a_int[14], a_int[15]); break;
+                default: printf("Dynamic CFN supports up to 16 arguments\n"); mylo_exit(1);
+            }
+        } else {
+            if (block->arg_count == 1) ((void (*)(double))fn)(a_dbl[0]);
+            else if (block->arg_count == 2) ((void (*)(double, double))fn)(a_dbl[0], a_dbl[1]);
+        }
+        vm_push(vm, 0.0, T_NUM);
+        return;
+    }
+
+    if (strcmp(block->return_type, "str") == 0 || strcmp(block->return_type, "string") == 0) {
+        const char *ret_s = NULL;
+        switch (block->arg_count) {
+            case 0: ret_s = ((const char* (*)())fn)(); break;
+            case 1: ret_s = ((const char* (*)(uintptr_t))fn)(a_int[0]); break;
+            case 2: ret_s = ((const char* (*)(uintptr_t, uintptr_t))fn)(a_int[0], a_int[1]); break;
+            case 3: ret_s = ((const char* (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2]); break;
+            case 4: ret_s = ((const char* (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3]); break;
+            default: break;
+        }
+        int sid = make_string(vm, ret_s ? (char*)ret_s : "");
+        vm_push(vm, (double)sid, T_STR);
+        return;
+    }
+
+    if (strcmp(block->return_type, "f64") == 0 || (strcmp(block->return_type, "f32") == 0 && strcmp(block->c_symbol_name, "atoi") != 0)) {
+        double ret_d = 0.0;
+        if (strcmp(block->return_type, "f32") == 0) {
+            if (!has_float_arg) {
+                switch (block->arg_count) {
+                    case 0: ret_d = ((float (*)())fn)(); break;
+                    case 1: ret_d = ((float (*)(uintptr_t))fn)(a_int[0]); break;
+                    case 2: ret_d = ((float (*)(uintptr_t, uintptr_t))fn)(a_int[0], a_int[1]); break;
+                    case 3: ret_d = ((float (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2]); break;
+                    case 4: ret_d = ((float (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3]); break;
+                    default: break;
+                }
+            } else {
+                if (block->arg_count == 1) ret_d = ((float (*)(float))fn)((float)a_dbl[0]);
+                else if (block->arg_count == 2) ret_d = ((float (*)(float, float))fn)((float)a_dbl[0], (float)a_dbl[1]);
+            }
+        } else {
+            if (!has_float_arg) {
+                switch (block->arg_count) {
+                    case 0: ret_d = ((double (*)())fn)(); break;
+                    case 1: ret_d = ((double (*)(uintptr_t))fn)(a_int[0]); break;
+                    case 2: ret_d = ((double (*)(uintptr_t, uintptr_t))fn)(a_int[0], a_int[1]); break;
+                    case 3: ret_d = ((double (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2]); break;
+                    case 4: ret_d = ((double (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3]); break;
+                    default: break;
+                }
+            } else {
+                if (block->arg_count == 1) ret_d = ((double (*)(double))fn)(a_dbl[0]);
+                else if (block->arg_count == 2) ret_d = ((double (*)(double, double))fn)(a_dbl[0], a_dbl[1]);
+            }
+        }
+        vm_push(vm, ret_d, T_NUM);
+        return;
+    }
+
+    // Default: Integer / pointer return (i32, i64, bool, atoi, etc.)
+    intptr_t ret_i = 0;
+    switch (block->arg_count) {
+        case 0: ret_i = ((intptr_t (*)())fn)(); break;
+        case 1: ret_i = ((intptr_t (*)(uintptr_t))fn)(a_int[0]); break;
+        case 2: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t))fn)(a_int[0], a_int[1]); break;
+        case 3: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2]); break;
+        case 4: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3]); break;
+        case 5: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4]); break;
+        case 6: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5]); break;
+        case 7: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6]); break;
+        case 8: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7]); break;
+        case 9: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8]); break;
+        case 10: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9]); break;
+        case 11: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10]); break;
+        case 12: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11]); break;
+        case 13: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12]); break;
+        case 14: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13]); break;
+        case 15: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13], a_int[14]); break;
+        case 16: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13], a_int[14], a_int[15]); break;
+        default: printf("Dynamic CFN supports up to 16 arguments\n"); mylo_exit(1);
+    }
+    vm_push(vm, (double)ret_i, T_NUM);
 }
 
 static void parse_cfn_decl() {
@@ -349,8 +501,12 @@ static void parse_cfn_decl() {
     int ffi_idx = ffi_count++;
     ffi_blocks[ffi_idx].id = ffi_idx;
     ffi_blocks[ffi_idx].arg_count = 0;
+    strcpy(ffi_blocks[ffi_idx].c_symbol_name, name);
     strcpy(ffi_blocks[ffi_idx].func_name, mangled_name);
     strcpy(ffi_blocks[ffi_idx].return_type, "void");
+    ffi_blocks[ffi_idx].native_symbol = NULL;
+    ffi_blocks[ffi_idx].is_bound = false;
+    ffi_blocks[ffi_idx].is_cfn = true;
     match(TK_LPAREN);
     while (curr.type != TK_RPAREN && curr.type != TK_EOF) {
         if (ffi_blocks[ffi_idx].arg_count >= MAX_FFI_ARGS) error("Too many FFI args");
@@ -399,6 +555,23 @@ static void parse_cfn_decl() {
     }
     strcat(call_str, ");");
     strcpy(ffi_blocks[ffi_idx].code_body, call_str);
+
+    if (!MyloConfig.build_mode) {
+        void *sym = get_symbol(NULL, name);
+        if (!sym && strcmp(mangled_name, name) != 0) {
+            sym = get_symbol(NULL, mangled_name);
+        }
+        if (sym) {
+            ffi_blocks[ffi_idx].native_symbol = sym;
+            ffi_blocks[ffi_idx].is_bound = true;
+            bound_ffi_count++;
+            if (compiling_vm) {
+                int std_count = 0;
+                while (std_library[std_count].name != NULL) std_count++;
+                compiling_vm->natives[std_count + ffi_idx] = dynamic_cfn_invoker;
+            }
+        }
+    }
 }
 
 // Pass in the current depths right before entering the loop body
@@ -458,6 +631,27 @@ void emit_continue() {
     emit(OP_JMP);
     loop->continue_patches[loop->continue_count++] = compiling_vm->code_size;
     emit(0);
+}
+
+static void unescape_string(char *dest, const char *src_str, int max_len) {
+    int d = 0;
+    for (int i = 0; src_str[i] != '\0' && d < max_len - 1; i++) {
+        if (src_str[i] == '\\' && src_str[i + 1] != '\0') {
+            i++;
+            if (src_str[i] == 'n') dest[d++] = '\n';
+            else if (src_str[i] == 't') dest[d++] = '\t';
+            else if (src_str[i] == 'r') dest[d++] = '\r';
+            else if (src_str[i] == '\\') dest[d++] = '\\';
+            else if (src_str[i] == '"') dest[d++] = '"';
+            else {
+                dest[d++] = '\\';
+                if (d < max_len - 1) dest[d++] = src_str[i];
+            }
+        } else {
+            dest[d++] = src_str[i];
+        }
+    }
+    dest[d] = '\0';
 }
 
 void next_token() {
@@ -554,7 +748,6 @@ void next_token() {
         if (strcmp(curr.text, "fn") == 0) curr.type = TK_FN;
         else if (strcmp(curr.text, "struct") == 0) curr.type = TK_STRUCT;
         else if (strcmp(curr.text, "cfn") == 0) curr.type = TK_CFN;
-        else if (strcmp(curr.text, "var") == 0) curr.type = TK_VAR;
         else if (strcmp(curr.text, "if") == 0) curr.type = TK_IF;
         else if (strcmp(curr.text, "else") == 0) curr.type = TK_ELSE;
         else if (strcmp(curr.text, "elif") == 0) curr.type = TK_ELIF;
@@ -576,31 +769,61 @@ void next_token() {
         else if (strcmp(curr.text, "clear") == 0) curr.type = TK_CLEAR;
         else if (strcmp(curr.text, "monitor") == 0) curr.type = TK_MONITOR;
         else if (strcmp(curr.text, "debugger") == 0) curr.type = TK_DEBUGGER;
-        else if (strcmp(curr.text, "any") == 0) curr.type = TK_TYPE_DEF;
-        else if (strcmp(curr.text, "num") == 0) curr.type = TK_TYPE_DEF;
-        else if (strcmp(curr.text, "str") == 0) curr.type = TK_TYPE_DEF;
-        else if (strcmp(curr.text, "f64") == 0) curr.type = TK_TYPE_DEF;
-        else if (strcmp(curr.text, "f32") == 0) curr.type = TK_TYPE_DEF;
-        else if (strcmp(curr.text, "i32") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "u8") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "u16") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "u32") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "u64") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "i8") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "i16") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "i32") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "i64") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "f16") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "f32") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "f64") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "string") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "str") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "byte") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "bool") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "array") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "map") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "any") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "bytes") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "void") == 0) curr.type = TK_TYPE_DEF;
         else curr.type = TK_ID;
         curr.length = (int) (src - curr.start);
         return;
     }
     if (*src == '"') {
         src++;
-        char *start = src;
+        int idx = 0;
         while (*src != '"' && *src != 0) {
             if (*src == '\n') line++;
-            src++;
+            if (*src == '\\') {
+                src++;
+                if (*src == 'n') {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '\n';
+                    src++;
+                } else if (*src == 't') {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '\t';
+                    src++;
+                } else if (*src == 'r') {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '\r';
+                    src++;
+                } else if (*src == '\\') {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '\\';
+                    src++;
+                } else if (*src == '"') {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '"';
+                    src++;
+                } else {
+                    if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = '\\';
+                    if (*src && idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = *src++;
+                }
+            } else {
+                if (idx < MAX_STRING_LENGTH - 1) curr.text[idx++] = *src++;
+            }
         }
-        int len = (int) (src - start);
-        if (len > MAX_STRING_LENGTH - 1) len = MAX_STRING_LENGTH - 1;
-        strncpy(curr.text, start, len);
-        curr.text[len] = '\0';
+        curr.text[idx] = '\0';
         if (*src == '"') src++;
         curr.type = TK_STR;
         curr.length = (int) (src - curr.start);
@@ -653,16 +876,31 @@ void next_token() {
 }
 
 int get_type_id_from_token(const char *txt) {
+    if (strcmp(txt, "u8") == 0) return TYPE_U8;
+    if (strcmp(txt, "u16") == 0) return TYPE_U16;
+    if (strcmp(txt, "u32") == 0) return TYPE_U32;
+    if (strcmp(txt, "u64") == 0) return TYPE_U64;
+    if (strcmp(txt, "i8") == 0) return TYPE_I8;
+    if (strcmp(txt, "i16") == 0) return TYPE_I16;
+    if (strcmp(txt, "i32") == 0) return TYPE_I32;
+    if (strcmp(txt, "i64") == 0) return TYPE_I64;
+    if (strcmp(txt, "f16") == 0) return TYPE_F16;
+    if (strcmp(txt, "f32") == 0) return TYPE_F32;
+    if (strcmp(txt, "f64") == 0) return TYPE_F64;
+    if (strcmp(txt, "string") == 0 || strcmp(txt, "str") == 0) return TYPE_STR;
+    if (strcmp(txt, "byte") == 0) return TYPE_U8;
+    if (strcmp(txt, "bool") == 0) return TYPE_BOOL;
+    if (strcmp(txt, "array") == 0) return TYPE_ARRAY;
+    if (strcmp(txt, "map") == 0) return TYPE_MAP;
+    if (strcmp(txt, "struct") == 0) return TYPE_STRUCT;
+    if (strcmp(txt, "enum") == 0) return TYPE_ENUM;
     if (strcmp(txt, "any") == 0) return TYPE_ANY;
-    if (strcmp(txt, "num") == 0) return TYPE_NUM;
-    if (strcmp(txt, "str") == 0) return TYPE_STR;
-    if (strcmp(txt, "byte") == 0) return TYPE_BYTES;
-    if (strcmp(txt, "i32") == 0) return TYPE_I32_ARRAY;
-    if (strcmp(txt, "f32") == 0) return TYPE_F32_ARRAY;
-    if (strcmp(txt, "i16") == 0) return TYPE_I16_ARRAY;
-    if (strcmp(txt, "i64") == 0) return TYPE_I64_ARRAY;
-    if (strcmp(txt, "bool") == 0) return TYPE_BOOL_ARRAY;
-    return TYPE_ARRAY;
+    if (strcmp(txt, "bytes") == 0) return TYPE_BYTES;
+    if (strcmp(txt, "void") == 0) return TYPE_ANY;
+    if (strcmp(txt, "num") == 0) {
+        error("Type 'num' has been removed");
+    }
+    return TYPE_ANY;
 }
 
 void match(MyloTokenType t) {
@@ -698,6 +936,17 @@ void compiler_reset() {
     func_count = 0;
     struct_count = 0;
     enum_entry_count = 0;
+    for (int i = 0; i < MAX_NATIVES; i++) {
+        ffi_blocks[i].id = 0;
+        ffi_blocks[i].c_symbol_name[0] = '\0';
+        ffi_blocks[i].func_name[0] = '\0';
+        ffi_blocks[i].code_body[0] = '\0';
+        ffi_blocks[i].arg_count = 0;
+        ffi_blocks[i].return_type[0] = '\0';
+        ffi_blocks[i].native_symbol = NULL;
+        ffi_blocks[i].is_bound = false;
+        ffi_blocks[i].is_cfn = false;
+    }
     ffi_count = 0;
     bound_ffi_count = 0;
     debug_symbol_count = 0;
@@ -708,6 +957,17 @@ void compiler_reset() {
     c_header_count = 0;
     line = 1;
     inside_function = false;
+    last_expr_was_range = false;
+}
+
+static bool is_enum_type(const char *name) {
+    int len = (int)strlen(name);
+    for (int i = 0; i < enum_entry_count; i++) {
+        if (strncmp(enum_entries[i].name, name, len) == 0 && enum_entries[i].name[len] == '_') {
+            return true;
+        }
+    }
+    return false;
 }
 
 TypeInfo parse_type_spec() {
@@ -718,13 +978,28 @@ TypeInfo parse_type_spec() {
     } else {
         char tn[MAX_IDENTIFIER];
         parse_namespaced_id(tn);
+        if (strcmp(tn, "num") == 0) {
+            error("Type 'num' has been removed");
+        }
         int explicit_struct = find_struct(tn);
         if (explicit_struct == -1) {
              char m[MAX_IDENTIFIER * 2];
              get_mangled_name(m, tn);
              explicit_struct = find_struct(m);
         }
-        if(explicit_struct != -1) info.id = explicit_struct;
+        if (explicit_struct != -1) {
+            info.id = explicit_struct;
+        } else if (is_enum_type(tn)) {
+            info.id = TYPE_ENUM;
+        } else {
+            char m[MAX_IDENTIFIER * 2];
+            get_mangled_name(m, tn);
+            if (is_enum_type(m)) {
+                info.id = TYPE_ENUM;
+            } else {
+                error("Unknown type '%s'", tn);
+            }
+        }
     }
 
     if (curr.type == TK_LBRACKET) {
@@ -769,16 +1044,24 @@ static void c_gen_type_name(FILE* fp, const char* type, bool is_return) {
     else if (strcmp(type, "i32") == 0) fprintf(fp, "int");
     else if (strcmp(type, "i64") == 0) fprintf(fp, "long long");
     else if (strcmp(type, "f32") == 0) fprintf(fp, "float");
+    else if (strcmp(type, "f64") == 0) fprintf(fp, "double");
     else if (strcmp(type, "i16") == 0) fprintf(fp, "short");
-    else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0) fprintf(fp, "unsigned char");
-
+    else if (strcmp(type, "i8") == 0) fprintf(fp, "signed char");
+    else if (strcmp(type, "u8") == 0 || strcmp(type, "byte") == 0) fprintf(fp, "unsigned char");
+    else if (strcmp(type, "u16") == 0) fprintf(fp, "unsigned short");
+    else if (strcmp(type, "u32") == 0) fprintf(fp, "unsigned int");
+    else if (strcmp(type, "u64") == 0) fprintf(fp, "unsigned long long");
+    else if (strcmp(type, "bool") == 0) fprintf(fp, "unsigned char");
+    else if (strcmp(type, "bytes") == 0) fprintf(fp, "unsigned char*");
     else if (strstr(type, "[]")) {
         if (is_return) {
             fprintf(fp, "MyloReturn");
         } else {
-            if (strstr(type, "byte") || strstr(type, "bool")) fprintf(fp, "unsigned char*");
+            if (strstr(type, "byte") || strstr(type, "bool") || strstr(type, "u8")) fprintf(fp, "unsigned char*");
             else if (strstr(type, "i32")) fprintf(fp, "int*");
+            else if (strstr(type, "i64") || strstr(type, "u64")) fprintf(fp, "long long*");
             else if (strstr(type, "f32")) fprintf(fp, "float*");
+            else if (strstr(type, "f64")) fprintf(fp, "double*");
             else fprintf(fp, "void*");
         }
     }
@@ -797,12 +1080,14 @@ static void c_gen_ffi_wrappers(FILE *fp) {
         for (int a = 0; a < ffi_blocks[i].arg_count; a++) {
             char *type = ffi_blocks[i].args[a].type;
             c_gen_type_name(fp, type, false);
-             if (strlen(type) > 0 && strcmp(type, "num") != 0 && !strstr(type, "[]") &&
-                 strcmp(type, "i32")!=0 && strcmp(type, "i64")!=0 && strcmp(type, "f32")!=0 &&
-                 strcmp(type, "i16")!=0 && strcmp(type, "bool")!=0 && strcmp(type, "byte")!=0 &&
-                 strcmp(type, "str")!=0 && strcmp(type, "string")!=0 && strcmp(type, "bytes")!=0) {
-                 fprintf(fp, "*");
-             }
+            if (strlen(type) > 0 && strcmp(type, "num") != 0 && !strstr(type, "[]") &&
+                strcmp(type, "i32")!=0 && strcmp(type, "i64")!=0 && strcmp(type, "f32")!=0 && strcmp(type, "f64")!=0 &&
+                strcmp(type, "i16")!=0 && strcmp(type, "i8")!=0 && strcmp(type, "u8")!=0 && strcmp(type, "u16")!=0 &&
+                strcmp(type, "u32")!=0 && strcmp(type, "u64")!=0 &&
+                strcmp(type, "bool")!=0 && strcmp(type, "byte")!=0 &&
+                strcmp(type, "str")!=0 && strcmp(type, "string")!=0 && strcmp(type, "bytes")!=0) {
+                fprintf(fp, "*");
+            }
             fprintf(fp, " %s", ffi_blocks[i].args[a].name);
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
@@ -829,32 +1114,37 @@ static void c_gen_ffi_wrappers(FILE *fp) {
             char *name = ffi_blocks[i].args[a].name;
             if (strcmp(type, "str") == 0 || strcmp(type, "string") == 0) fprintf(
                 fp, "vm->string_pool[(int)_raw_%s]", name);
-            else if (strcmp(type, "num") == 0) fprintf(fp, "_raw_%s", name);
+            else if (strcmp(type, "num") == 0 || strcmp(type, "f64") == 0) fprintf(fp, "_raw_%s", name);
             else if (strcmp(type, "i32") == 0) fprintf(fp, "(int)_raw_%s", name);
             else if (strcmp(type, "i64") == 0) fprintf(fp, "(long long)_raw_%s", name);
             else if (strcmp(type, "f32") == 0) fprintf(fp, "(float)_raw_%s", name);
             else if (strcmp(type, "i16") == 0) fprintf(fp, "(short)_raw_%s", name);
-            else if (strcmp(type, "bool") == 0 || strcmp(type, "byte") == 0) fprintf(
+            else if (strcmp(type, "i8") == 0) fprintf(fp, "(signed char)_raw_%s", name);
+            else if (strcmp(type, "u8") == 0 || strcmp(type, "byte") == 0 || strcmp(type, "bool") == 0) fprintf(
                 fp, "(unsigned char)_raw_%s", name);
-            else if (strcmp(type, "bytes") == 0) fprintf(
+            else if (strcmp(type, "u16") == 0) fprintf(fp, "(unsigned short)_raw_%s", name);
+            else if (strcmp(type, "u32") == 0) fprintf(fp, "(unsigned int)_raw_%s", name);
+            else if (strcmp(type, "u64") == 0) fprintf(fp, "(unsigned long long)_raw_%s", name);
+            else if (strcmp(type, "bytes") == 0 || strcmp(type, "byte[]") == 0 || strcmp(type, "bool[]") == 0 || strcmp(type, "u8[]") == 0) fprintf(
                 fp, "(unsigned char*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else if (strcmp(type, "byte[]") == 0 || strcmp(type, "bool[]") == 0) fprintf(fp, "(unsigned char*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
             else if (strcmp(type, "i32[]") == 0) fprintf(fp, "(int*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
             else if (strcmp(type, "i64[]") == 0) fprintf(fp, "(long long*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
             else if (strcmp(type, "f32[]") == 0) fprintf(fp, "(float*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
-            else if (strcmp(type, "i16[]") == 0) fprintf(fp, "(short*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
+            else if (strcmp(type, "f64[]") == 0) fprintf(fp, "(double*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
             else if (strstr(type, "[]")) fprintf(fp, "(void*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_ARRAY)", name);
             else fprintf(fp, "(c_%s*)(vm_resolve_ptr(vm, _raw_%s) + HEAP_HEADER_STRUCT)", type, name);
             if (a < ffi_blocks[i].arg_count - 1) fprintf(fp, ", ");
         }
         fprintf(fp, ");\n");
 
-        if (strcmp(ret_type, "num") == 0) fprintf(fp, "    vm_push(vm, res, T_NUM);\n");
+        if (strcmp(ret_type, "num") == 0 || strcmp(ret_type, "f64") == 0) fprintf(fp, "    vm_push(vm, res, T_NUM);\n");
         else if (strcmp(ret_type, "void") == 0) fprintf(fp, "    vm_push(vm, 0.0, T_NUM);\n");
         else if (strcmp(ret_type, "string") == 0 || strcmp(ret_type, "str") == 0) fprintf(
             fp, "    int id = make_string(vm, res);\n    vm_push(vm, (double)id, T_STR);\n");
         else if (strcmp(ret_type, "i32") == 0 || strcmp(ret_type, "i64") == 0 || strcmp(ret_type, "f32") == 0 ||
-                 strcmp(ret_type, "i16") == 0 || strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0)
+                 strcmp(ret_type, "i16") == 0 || strcmp(ret_type, "i8") == 0 || strcmp(ret_type, "u8") == 0 ||
+                 strcmp(ret_type, "u16") == 0 || strcmp(ret_type, "u32") == 0 || strcmp(ret_type, "u64") == 0 ||
+                 strcmp(ret_type, "byte") == 0 || strcmp(ret_type, "bool") == 0)
             fprintf(fp, "    vm_push(vm, (double)res, T_NUM);\n");
         else if (strlen(ret_type) > 0) {
 
@@ -910,12 +1200,19 @@ void factor() {
     } else if (curr.type == TK_LBRACKET) {
         match(TK_LBRACKET);
         int count = 0;
+        bool is_single_range = false;
         if (curr.type != TK_RBRACKET) {
             expression(); count++;
+            if (count == 1 && curr.type == TK_RBRACKET && last_expr_was_range) {
+                is_single_range = true;
+            }
             while (curr.type == TK_COMMA) { match(TK_COMMA); expression(); count++; }
         }
         match(TK_RBRACKET);
-        emit(OP_ARR); emit(count);
+        if (!is_single_range) {
+            emit(OP_ARR); emit(count);
+        }
+        last_expr_was_range = false;
     } else if (curr.type == TK_LBRACE) {
         char *safe_src = src; Token safe_curr = curr; int safe_line = line;
         match(TK_LBRACE);
@@ -937,9 +1234,13 @@ void factor() {
         match(TK_ID);
         int ffi_idx = ffi_count++;
         ffi_blocks[ffi_idx].id = ffi_idx;
+        ffi_blocks[ffi_idx].c_symbol_name[0] = '\0';
         ffi_blocks[ffi_idx].func_name[0] = '\0';
         ffi_blocks[ffi_idx].arg_count = 0;
         ffi_blocks[ffi_idx].return_type[0] = '\0';
+        ffi_blocks[ffi_idx].native_symbol = NULL;
+        ffi_blocks[ffi_idx].is_bound = false;
+        ffi_blocks[ffi_idx].is_cfn = false;
 
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
@@ -1026,7 +1327,9 @@ void factor() {
                     char chunk[MAX_STRING_LENGTH]; int len = (int) (ptr - start);
                     if (len >= MAX_STRING_LENGTH) len = MAX_STRING_LENGTH - 1;
                     strncpy(chunk, start, len); chunk[len] = '\0';
-                    int id = make_string(compiling_vm, chunk); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
+                    char unesc[MAX_STRING_LENGTH];
+                    unescape_string(unesc, chunk, MAX_STRING_LENGTH);
+                    int id = make_string(compiling_vm, unesc); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
                 }
                 ptr++; char *expr_start = ptr;
                 while (*ptr && *ptr != '}') ptr++;
@@ -1048,7 +1351,9 @@ void factor() {
             char chunk[MAX_STRING_LENGTH]; int len = (int) (ptr - start);
             if (len >= MAX_STRING_LENGTH) len = MAX_STRING_LENGTH - 1;
             strncpy(chunk, start, len); chunk[len] = '\0';
-            int id = make_string(compiling_vm, chunk); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
+            char unesc[MAX_STRING_LENGTH];
+            unescape_string(unesc, chunk, MAX_STRING_LENGTH);
+            int id = make_string(compiling_vm, unesc); emit(OP_PSH_STR); emit(id); emit(OP_CAT);
         }
         match(TK_FSTR);
 
@@ -1056,7 +1361,7 @@ void factor() {
         int id = make_string(compiling_vm, curr.text);
         emit(OP_PSH_STR); emit(id); emit(OP_MK_BYTES);
         match(TK_BSTR);
-    } else if (curr.type == TK_ID) {
+    } else if (curr.type == TK_ID || curr.type == TK_TYPE_DEF) {
         Token start_token = curr;
         char name[MAX_IDENTIFIER];
         parse_namespaced_id(name);
@@ -1216,6 +1521,7 @@ void additive_expr() {
 void relation_expr() {
     range_expr();
     while (curr.type >= TK_LT && curr.type <= TK_NEQ) {
+        last_expr_was_range = false;
         MyloTokenType op = curr.type;
         next_token();
         range_expr();
@@ -1243,12 +1549,16 @@ void range_expr() {
         match(TK_RANGE);
         additive_expr();
         emit(OP_RANGE);
+        last_expr_was_range = true;
+    } else {
+        last_expr_was_range = false;
     }
 }
 // 1. Create the AND expression parser
 void logic_and_expr() {
     relation_expr();
     while (curr.type == TK_AND) {
+        last_expr_was_range = false;
         match(TK_AND);
         relation_expr();
         emit(OP_AND);
@@ -1259,6 +1569,7 @@ void logic_and_expr() {
 void logic_or_expr() {
     logic_and_expr(); //
     while (curr.type == TK_OR) {
+        last_expr_was_range = false;
         match(TK_OR);
         logic_and_expr();
         emit(OP_OR);
@@ -1288,10 +1599,20 @@ void expression() {
 
 int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
     if (is_loc) {
-        if (name) strcpy(locals[local_count].name, name);
+        if (name) {
+            for (int i = 0; i < local_count; i++) {
+                if (strcmp(locals[i].name, name) == 0 && locals[i].scope_depth == current_scope_depth) {
+                    error("Redefinition of '%s' in the same scope", name);
+                }
+            }
+            strcpy(locals[local_count].name, name);
+        } else {
+            locals[local_count].name[0] = '\0';
+        }
         locals[local_count].offset = local_count;
         locals[local_count].type_id = type_id;
         locals[local_count].is_array = is_array;
+        locals[local_count].scope_depth = current_scope_depth;
         if (debug_symbol_count < MAX_DEBUG_SYMBOLS) {
             if (name) strcpy(debug_symbols[debug_symbol_count].name, name);
             debug_symbols[debug_symbol_count].stack_offset = local_count;
@@ -1306,10 +1627,8 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
     get_mangled_name(m, name);
 
     for (int i = 0; i < global_count; i++) {
-        if (strcmp(globals[i].name, m) == 0) {
-            globals[i].type_id = type_id;
-            globals[i].is_array = is_array;
-            return i;
+        if (strcmp(globals[i].name, m) == 0 && globals[i].scope_depth == current_scope_depth) {
+            error("Redefinition of '%s' in the same scope", name);
         }
     }
 
@@ -1317,6 +1636,7 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
     globals[global_count].addr = global_count;
     globals[global_count].type_id = type_id;
     globals[global_count].is_array = is_array;
+    globals[global_count].scope_depth = current_scope_depth;
     return global_count++;
 }
 
@@ -1363,9 +1683,13 @@ static void parse_c_block_stmt() {
     match(TK_ID);
     int ffi_idx = ffi_count++;
     ffi_blocks[ffi_idx].id = ffi_idx; 
+    ffi_blocks[ffi_idx].c_symbol_name[0] = '\0';
     ffi_blocks[ffi_idx].func_name[0] = '\0';
     ffi_blocks[ffi_idx].arg_count = 0;
     strcpy(ffi_blocks[ffi_idx].return_type, "void");
+    ffi_blocks[ffi_idx].native_symbol = NULL;
+    ffi_blocks[ffi_idx].is_bound = false;
+    ffi_blocks[ffi_idx].is_cfn = false;
 
     if (curr.type == TK_LPAREN) {
         match(TK_LPAREN);
@@ -1452,7 +1776,15 @@ static void parse_import() {
         char resolved_path[2048];
         strcpy(resolved_path, filename); // Track true location for .so loading
 
-        // 1. Check module_path entries
+        // 1. Check relative to current_file_dir (e.g. if script is in ../modules/pixel_window/)
+        if (!c && strcmp(current_file_dir, ".") != 0) {
+            char tmp[2048];
+            snprintf(tmp, sizeof(tmp), "%s/%s", current_file_dir, filename);
+            c = read_file(tmp);
+            if (c) strcpy(resolved_path, tmp);
+        }
+
+        // 2. Check module_path entries
         if (!c) {
             for (int i = 0; i < search_path_count; i++) {
                 char tmp[MAX_STRING_LENGTH];
@@ -1462,10 +1794,21 @@ static void parse_import() {
             }
         }
 
-        // 2. NEW: Recursive search in `<exe_dir>/modules/`
+        // 3. Recursive search in `<exe_dir>/modules/`
         if (!c) {
             char modules_path[2048];
             snprintf(modules_path, sizeof(modules_path), "%s/modules", mylo_exe_dir);
+            char* found_path = find_file_recursive(modules_path, filename);
+            if (found_path) {
+                c = read_file(found_path);
+                strcpy(resolved_path, found_path);
+            }
+        }
+
+        // 4. Recursive search in `<exe_dir>/../modules/` (e.g. when executing from build/)
+        if (!c) {
+            char modules_path[2048];
+            snprintf(modules_path, sizeof(modules_path), "%s/../modules", mylo_exe_dir);
             char* found_path = find_file_recursive(modules_path, filename);
             if (found_path) {
                 c = read_file(found_path);
@@ -1483,43 +1826,56 @@ static void parse_import() {
             // Use the fully resolved path so the .so file is located properly!
             get_lib_name(lib_name, resolved_path);
 
-            if (!MyloConfig.debug_mode) fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
             void *lib = load_library(lib_name);
-            if (!lib) error("Could not load native binary '%s'", lib_name);
+            if (!lib) {
+                // If no shared library is found, check if all added natives are cfn functions and already bound dynamically!
+                bool all_bound = (added_natives > 0);
+                for (int i = start_ffi_index; i < ffi_count; i++) {
+                    if (!ffi_blocks[i].is_bound) {
+                        all_bound = false;
+                        break;
+                    }
+                }
+                if (!all_bound) {
+                    if (!MyloConfig.debug_mode) fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
+                    error("Could not load native binary '%s'", lib_name);
+                }
+            } else {
+                if (!MyloConfig.debug_mode) fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
+                typedef void (*BindFunc)(VM *, int, MyloAPI *);
+                BindFunc binder = (BindFunc) get_symbol(lib, "mylo_bind_lib");
+                if (!binder) error("Native module '%s' invalid", lib_name);
 
-            typedef void (*BindFunc)(VM *, int, MyloAPI *);
-            BindFunc binder = (BindFunc) get_symbol(lib, "mylo_bind_lib");
-            if (!binder) error("Native module '%s' invalid", lib_name);
+                MyloAPI api;
+                api.push = vm_push;
+                api.pop = vm_pop;
+                api.make_string = make_string;
+                api.heap_alloc = heap_alloc;
+                api.resolve_ptr = vm_resolve_ptr;
+                api.store_copy = vm_store_copy;
+                api.store_ptr = vm_store_ptr;
+                api.get_ref = vm_get_ref;
+                api.free_ref = vm_free_ref;
+                api.natives_array = compiling_vm->natives;
+                api.string_pool = compiling_vm->string_pool;
+                api.find_function = vm_find_function;
+                api.exec_vm_from = run_vm_from;
 
-            MyloAPI api;
-            api.push = vm_push;
-            api.pop = vm_pop;
-            api.make_string = make_string;
-            api.heap_alloc = heap_alloc;
-            api.resolve_ptr = vm_resolve_ptr;
-            api.store_copy = vm_store_copy;
-            api.store_ptr = vm_store_ptr;
-            api.get_ref = vm_get_ref;
-            api.free_ref = vm_free_ref;
-            api.natives_array = compiling_vm->natives;
-            api.string_pool = compiling_vm->string_pool;
-            api.find_function = vm_find_function;
-            api.exec_vm_from = run_vm_from;
+                binder(compiling_vm, std_count + start_ffi_index, &api);
+                bound_ffi_count += added_natives;
 
-            binder(compiling_vm, std_count + start_ffi_index, &api);
-            bound_ffi_count += added_natives;
+                if (compiling_vm->dependency_count < MAX_DEPENDENCIES) {
+                    Dependency* dep = &compiling_vm->dependencies[compiling_vm->dependency_count++];
 
-            if (compiling_vm->dependency_count < MAX_DEPENDENCIES) {
-                Dependency* dep = &compiling_vm->dependencies[compiling_vm->dependency_count++];
-
-                // FIX: Strip directories so we only embed the base filename into the bundle
-                char clean_lib_name[MAX_STRING_LENGTH];
-                char* slash = strrchr(filename, '/');
-                char* backslash = strrchr(filename, '\\');
-                char* base_filename = (slash > backslash) ? slash + 1 : (backslash ? backslash + 1 : filename);
-                get_lib_name(clean_lib_name, base_filename);
-                strcpy(dep->name, clean_lib_name);
-                dep->start_index = std_count + start_ffi_index;
+                    // FIX: Strip directories so we only embed the base filename into the bundle
+                    char clean_lib_name[MAX_STRING_LENGTH];
+                    char* slash = strrchr(filename, '/');
+                    char* backslash = strrchr(filename, '\\');
+                    char* base_filename = (slash > backslash) ? slash + 1 : (backslash ? backslash + 1 : filename);
+                    get_lib_name(clean_lib_name, base_filename);
+                    strcpy(dep->name, clean_lib_name);
+                    dep->start_index = std_count + start_ffi_index;
+                }
             }
         }
     }
@@ -1532,9 +1888,13 @@ static void parse_import() {
         }
         int ffi_idx = ffi_count++;
         ffi_blocks[ffi_idx].id = ffi_idx;
+        ffi_blocks[ffi_idx].c_symbol_name[0] = '\0';
         ffi_blocks[ffi_idx].func_name[0] = '\0';
         ffi_blocks[ffi_idx].arg_count = 0;
         strcpy(ffi_blocks[ffi_idx].return_type, "void");
+        ffi_blocks[ffi_idx].native_symbol = NULL;
+        ffi_blocks[ffi_idx].is_bound = false;
+        ffi_blocks[ffi_idx].is_cfn = false;
         if (curr.type == TK_LPAREN) {
             match(TK_LPAREN);
             while (curr.type != TK_RPAREN) {
@@ -1601,7 +1961,14 @@ static void parse_import() {
 
         char *c = read_file(f);
 
-        // 1. Check module_path entries
+        // 1. Check relative to current_file_dir (e.g. if script is in ../modules/pixel_window/)
+        if (!c && strcmp(current_file_dir, ".") != 0) {
+            char tmp[2048];
+            snprintf(tmp, sizeof(tmp), "%s/%s", current_file_dir, f);
+            c = read_file(tmp);
+        }
+
+        // 2. Check module_path entries
         if (!c) {
             for (int i = 0; i < search_path_count; i++) {
                 char tmp[MAX_STRING_LENGTH];
@@ -1611,10 +1978,18 @@ static void parse_import() {
             }
         }
 
-        // 2. NEW: Recursive search in `<exe_dir>/modules/`
+        // 3. Recursive search in `<exe_dir>/modules/`
         if (!c) {
             char modules_path[2048];
             snprintf(modules_path, sizeof(modules_path), "%s/modules", mylo_exe_dir);
+            char* found_path = find_file_recursive(modules_path, f);
+            if (found_path) c = read_file(found_path);
+        }
+
+        // 4. Recursive search in `<exe_dir>/../modules/` (e.g. when executing from build/)
+        if (!c) {
+            char modules_path[2048];
+            snprintf(modules_path, sizeof(modules_path), "%s/../modules", mylo_exe_dir);
             char* found_path = find_file_recursive(modules_path, f);
             if (found_path) c = read_file(found_path);
         }
@@ -1624,103 +1999,109 @@ static void parse_import() {
     }
 }
 
-static void parse_var_decl() {
-    match(TK_VAR);
-    char name[MAX_IDENTIFIER];
-    strcpy(name, curr.text);
-    match(TK_ID);
-    bool specific_region = false;
-    char region_var_name[MAX_IDENTIFIER];
+static inline bool is_packed_array_type(int type) {
+    return (type == TYPE_U8 || type == TYPE_U16 || type == TYPE_U32 || type == TYPE_U64 ||
+            type == TYPE_I8 || type == TYPE_I16 || type == TYPE_I32 || type == TYPE_I64 ||
+            type == TYPE_F16 || type == TYPE_F32 || type == TYPE_F64 ||
+            type == TYPE_BOOL || type == TYPE_BOOL_ARRAY || type == TYPE_BYTES);
+}
 
-    if (curr.type == TK_SCOPE) {
-        match(TK_SCOPE);
-        strcpy(region_var_name, name);
-        specific_region = true;
-        char member_name[MAX_IDENTIFIER];
-        strcpy(member_name, curr.text);
-        match(TK_ID);
-        sprintf(name, "%s_%s", region_var_name, member_name);
-
-        int reg_loc = find_local(region_var_name);
-        if (reg_loc != -1) {
-            emit(OP_LVAR);
-            emit(locals[reg_loc].offset);
-        } else {
-            int reg_glob = find_global(region_var_name);
-            if (reg_glob != -1) {
-                emit(OP_GET);
-                emit(globals[reg_glob].addr);
-            } else error("Undefined region");
-        }
-        emit(OP_SET_CTX);
-    }
-
-    TypeInfo type_info = {TYPE_ANY, false};
-    if (curr.type == TK_COLON) {
-        match(TK_COLON);
-        type_info = parse_type_spec();
-    }
-    match(TK_EQ_ASSIGN);
+static void parse_var_decl(char *name) {
+    match(TK_COLON);
+    TypeInfo type_info = parse_type_spec();
 
     bool handled = false;
 
-    if (type_info.is_array && type_info.id != TYPE_ANY && type_info.id < 0 && curr.type == TK_LBRACKET) {
-        match(TK_LBRACKET);
-        int count = 0;
-        if (curr.type != TK_RBRACKET) {
-            do {
-                expression();
-                count++;
-                if (curr.type == TK_COMMA) match(TK_COMMA);
-            } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
-        }
-        match(TK_RBRACKET);
-        emit(OP_MAKE_ARR);
-        emit(count);
-        emit(type_info.id);
-        handled = true;
-    }
-    else if (type_info.is_array && type_info.id >= 0 && curr.type == TK_LBRACKET) {
-        match(TK_LBRACKET);
-        int count = 0;
-        if (curr.type != TK_RBRACKET) {
-            do {
-                if (curr.type == TK_LBRACE) parse_struct_literal(type_info.id);
-                else expression();
-                count++;
-                if (curr.type == TK_COMMA) match(TK_COMMA);
-            } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
-        }
-        match(TK_RBRACKET);
-        emit(OP_ARR);
-        emit(count);
-        handled = true;
-    }
-    else if (type_info.id >= 0 && !type_info.is_array && curr.type == TK_LBRACE) {
-        parse_struct_literal(type_info.id);
-        handled = true;
-    }
-    else if (type_info.id == TYPE_ANY && curr.type == TK_LBRACE) {
-        char *safe_src = src;
-        Token safe_curr = curr;
-        int safe_line = line;
-        match(TK_LBRACE);
-        bool is_map = (curr.type == TK_STR || curr.type == TK_RBRACE);
-        src = safe_src;
-        curr = safe_curr;
-        line = safe_line;
-        if (is_map) parse_map_literal();
-        else error("Struct literal requires type");
-        handled = true;
-    }
+    if (curr.type == TK_EQ_ASSIGN) {
+        match(TK_EQ_ASSIGN);
 
-    if (!handled) {
-        expression();
-    }
+        if (type_info.is_array && is_packed_array_type(type_info.id) && curr.type == TK_LBRACKET) {
+            match(TK_LBRACKET);
+            int count = 0;
+            bool is_single_range = false;
+            if (curr.type != TK_RBRACKET) {
+                do {
+                    expression();
+                    count++;
+                    if (count == 1 && curr.type == TK_RBRACKET && last_expr_was_range) {
+                        is_single_range = true;
+                    }
+                    if (curr.type == TK_COMMA) match(TK_COMMA);
+                } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
+            }
+            match(TK_RBRACKET);
+            if (is_single_range) {
+                emit(OP_CAST_ARR);
+                emit(type_info.id);
+            } else {
+                emit(OP_MAKE_ARR);
+                emit(count);
+                emit(type_info.id);
+            }
+            last_expr_was_range = false;
+            handled = true;
+        }
+        else if (type_info.is_array && curr.type == TK_LBRACKET) {
+            match(TK_LBRACKET);
+            int count = 0;
+            bool is_single_range = false;
+            if (curr.type != TK_RBRACKET) {
+                do {
+                    if (type_info.id >= 0) parse_struct_literal(type_info.id);
+                    else expression();
+                    count++;
+                    if (count == 1 && curr.type == TK_RBRACKET && last_expr_was_range) {
+                        is_single_range = true;
+                    }
+                    if (curr.type == TK_COMMA) match(TK_COMMA);
+                } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
+            }
+            match(TK_RBRACKET);
+            if (!is_single_range) {
+                emit(OP_ARR);
+                emit(count);
+            }
+            last_expr_was_range = false;
+            handled = true;
+        }
+        else if (type_info.id >= 0 && !type_info.is_array && curr.type == TK_LBRACE) {
+            parse_struct_literal(type_info.id);
+            handled = true;
+        }
+        else if (type_info.id == TYPE_ANY && curr.type == TK_LBRACE) {
+            char *safe_src = src;
+            Token safe_curr = curr;
+            int safe_line = line;
+            match(TK_LBRACE);
+            bool is_map = (curr.type == TK_STR || curr.type == TK_RBRACE);
+            src = safe_src;
+            curr = safe_curr;
+            line = safe_line;
+            if (is_map) parse_map_literal();
+            else error("Struct literal requires type");
+            handled = true;
+        }
 
-    if (type_info.id != TYPE_ANY && !type_info.is_array) {
-        emit(OP_CAST);
-        emit(type_info.id);
+        if (!handled) {
+            expression();
+            if (type_info.is_array && is_packed_array_type(type_info.id) && last_expr_was_range) {
+                emit(OP_CAST_ARR);
+                emit(type_info.id);
+            }
+            last_expr_was_range = false;
+        }
+
+        if (type_info.id != TYPE_ANY && !type_info.is_array) {
+            emit(OP_CAST);
+            emit(type_info.id);
+        }
+    } else {
+        emit(OP_PSH_NUM);
+        emit(make_const(compiling_vm, 0.0));
+        if (type_info.id != TYPE_ANY && !type_info.is_array) {
+            emit(OP_CAST);
+            emit(type_info.id);
+        }
     }
 
     int var_idx = alloc_var(inside_function, name, type_info.id, type_info.is_array);
@@ -1728,19 +2109,42 @@ static void parse_var_decl() {
         emit(OP_SET);
         emit(globals[var_idx].addr);
     }
-
-    if (specific_region) {
-        emit(OP_PSH_NUM);
-        emit(make_const(compiling_vm, 0.0));
-        emit(OP_SET_CTX);
-    }
 }
 
 static void parse_id_statement(Token start_token, char *name) {
     if (curr.type == TK_EQ_ASSIGN) {
         match(TK_EQ_ASSIGN);
-        expression();
         int loc = find_local(name);
+        int glob = -1;
+        if (loc == -1) {
+            char m[MAX_IDENTIFIER * 2];
+            get_mangled_name(m, name);
+            if ((glob = find_global(m)) == -1) {
+                glob = find_global(name);
+            }
+        }
+        if (loc == -1 && glob == -1) {
+            error("Variable '%s' is not declared (what is '%s'?)", name, name);
+        }
+        int var_type = (loc != -1) ? locals[loc].type_id : globals[glob].type_id;
+        bool is_array = (loc != -1) ? locals[loc].is_array : globals[glob].is_array;
+
+        // Strict Type Check for literal assignment
+        if (var_type == TYPE_STR && curr.type == TK_NUM) {
+            error("Type mismatch: cannot assign number to string '%s'", name);
+        }
+        if (var_type != TYPE_STR && var_type != TYPE_ANY && curr.type == TK_STR) {
+            error("Type mismatch: cannot assign string to non-string '%s'", name);
+        }
+
+        expression();
+
+        if (is_array && is_packed_array_type(var_type) && last_expr_was_range) {
+            emit(OP_CAST_ARR);
+            emit(var_type);
+        }
+        last_expr_was_range = false;
+
         if (loc != -1) {
             if (locals[loc].type_id != TYPE_ANY && !locals[loc].is_array) {
                 emit(OP_CAST);
@@ -1749,13 +2153,6 @@ static void parse_id_statement(Token start_token, char *name) {
             emit(OP_SVAR);
             emit(locals[loc].offset);
         } else {
-            int glob = -1;
-            char m[MAX_IDENTIFIER * 2];
-            get_mangled_name(m, name);
-            if ((glob = find_global(m)) != -1) {
-            } else if ((glob = find_global(name)) != -1) {
-            }
-            if (glob == -1) error("Undefined var '%s'", name);
             if (globals[glob].type_id != TYPE_ANY && !globals[glob].is_array) {
                 emit(OP_CAST);
                 emit(globals[glob].type_id);
@@ -1854,7 +2251,7 @@ static void parse_id_statement(Token start_token, char *name) {
                     expression();
 
                     // Strong Typing: If the leaf field has a specific type, cast the expression result
-                    if (field_type != TYPE_ANY && field_type != TYPE_NUM) {
+                    if (field_type != TYPE_ANY && !struct_defs[type_id].field_is_array[offset]) {
                         emit(OP_CAST);
                         emit(field_type);
                     }
@@ -1914,6 +2311,7 @@ static void parse_if() {
 
     // --- Track locals for the IF body ---
     int saved_local_count_if = local_count;
+    int saved_global_count_if = global_count;
     bool is_local_scope = inside_function;
 
     emit(OP_SCOPE_ENTER);
@@ -1925,6 +2323,8 @@ static void parse_if() {
         int vars_to_pop = local_count - saved_local_count_if;
         for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
         local_count = saved_local_count_if;
+    } else {
+        global_count = saved_global_count_if;
     }
 
     emit(OP_SCOPE_EXIT);
@@ -1953,6 +2353,7 @@ static void parse_if() {
         match(TK_LBRACE);
 
         int saved_local_count_elif = local_count;
+        int saved_global_count_elif = global_count;
         emit(OP_SCOPE_ENTER);
         current_scope_depth++;
 
@@ -1962,6 +2363,8 @@ static void parse_if() {
             int vars_to_pop = local_count - saved_local_count_elif;
             for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count_elif;
+        } else {
+            global_count = saved_global_count_elif;
         }
 
         emit(OP_SCOPE_EXIT);
@@ -1982,6 +2385,7 @@ static void parse_if() {
         match(TK_LBRACE);
 
         int saved_local_count_else = local_count;
+        int saved_global_count_else = global_count;
         emit(OP_SCOPE_ENTER);
         current_scope_depth++;
 
@@ -1991,6 +2395,8 @@ static void parse_if() {
             int vars_to_pop = local_count - saved_local_count_else;
             for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count_else;
+        } else {
+            global_count = saved_global_count_else;
         }
 
         emit(OP_SCOPE_EXIT);
@@ -2061,13 +2467,7 @@ void for_statement() {
 
     emit(OP_SCOPE_ENTER); current_scope_depth++; // Outer Loop Scope
 
-    if (curr.type == TK_VAR) {
-        match(TK_VAR);
-        strcpy(name1, curr.text);
-        match(TK_ID);
-        if (curr.type == TK_COLON) { match(TK_COLON); TypeInfo ti = parse_type_spec(); explicit_type = ti.id; }
-        is_iter = true;
-    } else if (curr.type == TK_ID) {
+    if (curr.type == TK_ID) {
         char *safe_src = src; Token safe_curr = curr; int safe_line = line;
         strcpy(name1, curr.text);
         match(TK_ID);
@@ -2078,6 +2478,7 @@ void for_statement() {
     }
 
     int saved_local_count = local_count;
+    int saved_global_count = global_count;
     bool is_local_scope = inside_function;
 
     if (is_iter) {
@@ -2091,7 +2492,7 @@ void for_statement() {
         int a = alloc_var(is_local_scope, arr_name, TYPE_ANY, true);
         if (!is_local_scope) { emit(OP_SET); emit(a); }
 
-        int i = alloc_var(is_local_scope, idx_name, TYPE_NUM, false);   emit(OP_PSH_NUM); emit(make_const(compiling_vm, 0.0));
+        int i = alloc_var(is_local_scope, idx_name, TYPE_I32, false);   emit(OP_PSH_NUM); emit(make_const(compiling_vm, 0.0));
         if (!is_local_scope) { emit(OP_SET); emit(i); }
 
         int loop = compiling_vm->code_size;
@@ -2108,6 +2509,7 @@ void for_statement() {
         match(TK_RPAREN); match(TK_LBRACE);
 
         int body_saved_local_count = local_count;
+        int body_saved_global_count = global_count;
         bool body_is_local_scope = inside_function;
 
         // Capture State right before entering the body!
@@ -2121,6 +2523,8 @@ void for_statement() {
             int vars_to_pop = local_count - body_saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = body_saved_local_count;
+        } else {
+            global_count = body_saved_global_count;
         }
 
         emit(OP_SCOPE_EXIT); current_scope_depth--; // Inner Body Scope
@@ -2142,6 +2546,8 @@ void for_statement() {
             int vars_to_pop = local_count - saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count;
+        } else {
+            global_count = saved_global_count;
         }
 
         emit(OP_SCOPE_EXIT); current_scope_depth--; // Outer Scope
@@ -2158,6 +2564,7 @@ void for_statement() {
         int exit = compiling_vm->code_size; emit(0); match(TK_LBRACE);
 
         int body_saved_local_count = local_count;
+        int body_saved_global_count = global_count;
         bool body_is_local_scope = inside_function;
 
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
@@ -2166,6 +2573,8 @@ void for_statement() {
             int vars_to_pop = local_count - body_saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = body_saved_local_count;
+        } else {
+            global_count = body_saved_global_count;
         }
 
         int brace_line = curr.line; match(TK_RBRACE);
@@ -2186,6 +2595,8 @@ void for_statement() {
             int vars_to_pop = local_count - saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count;
+        } else {
+            global_count = saved_global_count;
         }
 
         emit(OP_SCOPE_EXIT); current_scope_depth--; // Outer Scope
@@ -2203,23 +2614,14 @@ void struct_decl() {
     int idx = struct_count++;
     strcpy(struct_defs[idx].name, m);
     struct_defs[idx].field_count = 0;
-    while (curr.type == TK_VAR || curr.type == TK_FN) {
-        if (curr.type == TK_VAR) {
-            match(TK_VAR);
+    while (curr.type == TK_ID || curr.type == TK_FN) {
+        if (curr.type == TK_ID) {
             strcpy(struct_defs[idx].fields[struct_defs[idx].field_count], curr.text);
-
-            // Default to NUM (double) if no type is provided, standard for Mylo structs
-            struct_defs[idx].field_types[struct_defs[idx].field_count] = TYPE_NUM;
-
             match(TK_ID);
-
-            // Check for Type Annotation : i16
-            if (curr.type == TK_COLON) {
-                match(TK_COLON);
-                TypeInfo ti = parse_type_spec();
-                struct_defs[idx].field_types[struct_defs[idx].field_count] = ti.id;
-            }
-
+            match(TK_COLON);
+            TypeInfo ti = parse_type_spec();
+            struct_defs[idx].field_types[struct_defs[idx].field_count] = ti.id;
+            struct_defs[idx].field_is_array[struct_defs[idx].field_count] = ti.is_array;
             struct_defs[idx].field_count++;
         } else if (curr.type == TK_FN) {
             match(TK_FN);
@@ -2343,9 +2745,10 @@ void parse_struct_literal(int struct_idx) {
         // --- NEW CODE START ---
         // Look up the definition of the field we are setting
         int field_type = struct_defs[struct_idx].field_types[offset];
+        bool is_arr = struct_defs[struct_idx].field_is_array[offset];
 
         // If the field has a specific type (not 'any' and not generic 'num'), enforce it
-        if (field_type != TYPE_ANY && field_type != TYPE_NUM) {
+        if (field_type != TYPE_ANY && !is_arr) {
             emit(OP_CAST);
             emit(field_type);
         }
@@ -2439,17 +2842,55 @@ void statement() {
         match(TK_STR);
         match(TK_RPAREN);
         if (search_path_count < MAX_SEARCH_PATHS) strcpy(search_paths[search_path_count++], path);
+    } else if (curr.type == TK_LBRACE) {
+        match(TK_LBRACE);
+        bool is_arena = false;
+        if (curr.type == TK_LBRACKET) {
+            match(TK_LBRACKET);
+            char arena_name[MAX_IDENTIFIER];
+            strcpy(arena_name, curr.text);
+            match(TK_ID);
+            match(TK_RBRACKET);
+            is_arena = true;
+            emit(OP_NEW_ARENA);
+        }
+        int saved_local_count = local_count;
+        int saved_global_count = global_count;
+        bool is_local_scope = inside_function;
+
+        emit(OP_SCOPE_ENTER);
+        current_scope_depth++;
+
+        while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        if (is_local_scope) {
+            int vars_to_pop = local_count - saved_local_count;
+            for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
+            local_count = saved_local_count;
+        } else {
+            global_count = saved_global_count;
+        }
+
+        emit(OP_SCOPE_EXIT);
+        current_scope_depth--;
+        match(TK_RBRACE);
+
+        if (is_arena) {
+            emit(OP_DEL_ARENA);
+        }
     } else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
         parse_c_block_stmt();
-    } else if (curr.type == TK_VAR) {
-        parse_var_decl();
     } else if (curr.type == TK_FOR) {
         for_statement();
-    } else if (curr.type == TK_ID) {
+    } else if (curr.type == TK_ID || curr.type == TK_TYPE_DEF) {
         Token start_token = curr;
         char name[MAX_IDENTIFIER];
         parse_namespaced_id(name);
-        parse_id_statement(start_token, name);
+        if (curr.type == TK_COLON) {
+            parse_var_decl(name);
+        } else {
+            parse_id_statement(start_token, name);
+        }
     } else if (curr.type == TK_STRUCT) {
         struct_decl();
     } else if (curr.type == TK_IF) {
@@ -2458,6 +2899,7 @@ void statement() {
         match(TK_FOREVER);
         match(TK_LBRACE);
         int saved_local_count = local_count;
+        int saved_global_count = global_count;
         bool is_local_scope = inside_function;
 
         int loop_start = compiling_vm->code_size;
@@ -2472,6 +2914,8 @@ void statement() {
             int vars_to_pop = local_count - saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count;
+        } else {
+            global_count = saved_global_count;
         }
 
         emit(OP_SCOPE_EXIT); current_scope_depth--; // Body Scope
@@ -2541,6 +2985,10 @@ void parse_function_body(char* registered_name, char* mangled_name, int implicit
         if (curr.type == TK_COMMA) match(TK_COMMA);
     }
     match(TK_RPAREN);
+    if (curr.type == TK_ARROW) {
+        match(TK_ARROW);
+        parse_type_spec();
+    }
     match(TK_LBRACE);
 
     // [NEW] Function Scope
@@ -2555,6 +3003,7 @@ void parse_function_body(char* registered_name, char* mangled_name, int implicit
     }
 
     while (curr.type != TK_RBRACE) statement();
+    emit(OP_SCOPE_EXIT); current_scope_depth--;
     match(TK_RBRACE);
     emit(OP_PSH_NUM);
     int z = make_const(compiling_vm, 0.0);
@@ -2772,7 +3221,8 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     }
     fprintf(fp, "};\n\n");
 
-    fprintf(fp, "char string_pool[%d][%d] = {\n", MAX_STRINGS, MAX_STRING_LENGTH);
+    int pool_count = vm->str_count > 0 ? vm->str_count : 1;
+    fprintf(fp, "char string_pool[%d][%d] = {\n", pool_count, MAX_STRING_LENGTH);
     for (int i = 0; i < vm->str_count; i++) {
         fprintf(fp, "  \"");
         for (int j = 0; j < MAX_STRING_LENGTH; j++) {
@@ -2805,6 +3255,20 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
 
     // Main Entry Point
     fprintf(fp, "int main(int argc, char** argv) {\n");
+    fprintf(fp, "    if (argc > 0 && argv[0]) {\n");
+    fprintf(fp, "        char *last_slash = strrchr(argv[0], '/');\n");
+    fprintf(fp, "#ifdef _WIN32\n");
+    fprintf(fp, "        char *last_bslash = strrchr(argv[0], '\\\\');\n");
+    fprintf(fp, "        if (last_bslash && (!last_slash || last_bslash > last_slash)) last_slash = last_bslash;\n");
+    fprintf(fp, "#endif\n");
+    fprintf(fp, "        if (last_slash) {\n");
+    fprintf(fp, "            int dir_len = (int)(last_slash - argv[0]);\n");
+    fprintf(fp, "            if (dir_len > 0 && dir_len < sizeof(mylo_exe_dir) - 1) {\n");
+    fprintf(fp, "                strncpy(mylo_exe_dir, argv[0], dir_len);\n");
+    fprintf(fp, "                mylo_exe_dir[dir_len] = '\\0';\n");
+    fprintf(fp, "            }\n");
+    fprintf(fp, "        }\n");
+    fprintf(fp, "    }\n\n");
     // Instantiate VM on stack or heap
     fprintf(fp, "    VM vm;\n");
     fprintf(fp, "    vm_init(&vm);\n\n");
@@ -2832,7 +3296,7 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     fprintf(fp, "    }\n");
 
     fprintf(fp, "    // Register FFI Wrappers\n");
-    for (int i = 0; i < ffi_count; i++) fprintf(fp, "    vm.natives[i + %d] = __wrapper_%d;\n", bound_ffi_count + i, i);
+    for (int k = 0; k < ffi_count; k++) fprintf(fp, "    vm.natives[i + %d] = __wrapper_%d;\n", k, k);
 
     fprintf(fp, "\n    // Run\n");
     fprintf(fp, "    run_vm(&vm, false);\n");
@@ -2895,7 +3359,7 @@ void compile_repl(VM* vm, char *source, int *out_start_ip) {
 
     if (curr.type == TK_FN) function();
     else if (curr.type == TK_STRUCT) struct_decl();
-    else if (curr.type == TK_VAR || curr.type == TK_IF || curr.type == TK_FOR ||
+    else if (curr.type == TK_LBRACE || curr.type == TK_IF || curr.type == TK_FOR ||
              curr.type == TK_FOREVER || curr.type == TK_PRINT || curr.type == TK_IMPORT ||
              curr.type == TK_RET || curr.type == TK_BREAK || curr.type == TK_CONTINUE ||
              curr.type == TK_ENUM || curr.type == TK_REGION || curr.type == TK_CLEAR ||
