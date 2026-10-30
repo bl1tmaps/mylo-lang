@@ -18,6 +18,14 @@
 #include <process.h>
 #include <windows.h>
 #define STRDUP _strdup
+#elif defined(__AMIGA__)
+#include <dirent.h>
+#include <fcntl.h>
+#include <unistd.h>
+#define STRDUP strdup
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 #else
 #include <dirent.h>
 #include <fcntl.h>
@@ -51,6 +59,8 @@ typedef struct {
 #ifdef _WIN32
   HANDLE thread;
   unsigned threadID;
+#elif defined(__AMIGA__)
+  int thread;
 #else
   pthread_t thread;
 #endif
@@ -79,6 +89,10 @@ static CRITICAL_SECTION bus_lock;
 #define LOCK_BUS EnterCriticalSection(&bus_lock)
 #define UNLOCK_BUS LeaveCriticalSection(&bus_lock)
 #define INIT_BUS_LOCK InitializeCriticalSection(&bus_lock)
+#elif defined(__AMIGA__)
+#define LOCK_BUS
+#define UNLOCK_BUS
+#define INIT_BUS_LOCK
 #else
 static pthread_mutex_t bus_lock = PTHREAD_MUTEX_INITIALIZER;
 #define LOCK_BUS pthread_mutex_lock(&bus_lock)
@@ -237,6 +251,8 @@ void std_create_worker(VM *vm) {
 #ifdef _WIN32
   w->thread =
       (HANDLE)_beginthreadex(NULL, 0, &mylo_worker_entry, w, 0, &w->threadID);
+#elif defined(__AMIGA__)
+  mylo_worker_entry(w);
 #else
   pthread_create(&w->thread, NULL, &mylo_worker_entry, w);
 #endif
@@ -261,6 +277,8 @@ void std_dock_worker(VM *vm) {
 #ifdef _WIN32
   WaitForSingleObject(w->thread, INFINITE);
   CloseHandle(w->thread);
+#elif defined(__AMIGA__)
+  // Worker finished synchronously
 #else
   pthread_join(w->thread, NULL);
 #endif
@@ -1475,6 +1493,8 @@ void std_system_thread(VM *vm) {
   unsigned threadID;
   job_registry[slot].thread = (HANDLE)_beginthreadex(
       NULL, 0, &job_worker, &job_registry[slot], 0, &threadID);
+#elif defined(__AMIGA__)
+  job_worker(&job_registry[slot]);
 #else
   pthread_create(&job_registry[slot].thread, NULL, &job_worker,
                  &job_registry[slot]);
@@ -1660,7 +1680,14 @@ void std_bus_get(VM *vm) {
 }
 
 // Terminal control
-#ifndef _WIN32
+#if defined(__AMIGA__)
+int mylo_amiga_kbhit() {
+  return 0;
+}
+int mylo_amiga_getch() {
+  return getchar();
+}
+#elif !defined(_WIN32)
 // Helper for non-blocking check on POSIX systems
 int mylo_linux_kbhit() {
   struct termios oldt, newt;
@@ -1716,6 +1743,13 @@ void std_cget(VM *vm) {
     if (_kbhit())
       ch = _getch();
   }
+#elif defined(__AMIGA__)
+  if (blocking) {
+    ch = mylo_amiga_getch();
+  } else {
+    if (mylo_amiga_kbhit())
+      ch = mylo_amiga_getch();
+  }
 #else
   if (blocking) {
     ch = mylo_linux_getch();
@@ -1740,6 +1774,8 @@ void std_kbhit(VM *vm) {
   int hit = 0;
 #ifdef _WIN32
   hit = _kbhit();
+#elif defined(__AMIGA__)
+  hit = mylo_amiga_kbhit();
 #else
   hit = mylo_linux_kbhit();
 #endif
@@ -1846,6 +1882,14 @@ void std_get_keys(VM *vm) {
       if (s)
         collected_keys[count++] = s;
     }
+  }
+#elif defined(__AMIGA__)
+  while (mylo_amiga_kbhit() && count < 128) {
+    int ch = mylo_amiga_getch();
+    bool special = false;
+    char *s = decode_key_event(ch, &special);
+    if (s)
+      collected_keys[count++] = s;
   }
 #else
   // Linux/POSIX Sequence parsing
@@ -2497,6 +2541,9 @@ void std_clock(VM *vm) {
   QueryPerformanceCounter(&counter);
   double sec = (double)counter.QuadPart / (double)freq.QuadPart;
   vm_push(vm, sec, T_NUM);
+#elif defined(__AMIGA__)
+  double sec = (double)clock() / (double)CLOCKS_PER_SEC;
+  vm_push(vm, sec, T_NUM);
 #else
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -2523,6 +2570,8 @@ void std_sleep(VM *vm) {
   double ms = vm_pop(vm);
 #ifdef _WIN32
   Sleep((DWORD)ms);
+#elif defined(__AMIGA__)
+  usleep((unsigned long)(ms * 1000));
 #else
   usleep((useconds_t)(ms * 1000));
 #endif

@@ -1,6 +1,8 @@
 #ifndef MYLO_DEFINES_H
 #define MYLO_DEFINES_H
 
+#include <stdint.h>
+
 // VM Memory Limits
 #define STACK_SIZE 2048
 #define MAX_CODE 5368709

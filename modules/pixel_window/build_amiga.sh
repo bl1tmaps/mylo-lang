@@ -4,6 +4,9 @@ set -e
 # ==============================================================================
 # Configuration
 # ==============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MYLO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 # Path to the Amiga m68k cross-compiler
 CC="${AMIGA_CC:-$HOME/Downloads/m68k-amigaos-gcc/bin/m68k-amigaos-gcc}"
 
@@ -17,20 +20,20 @@ echo "======================================================================"
 # -fomit-frame-pointer: Free up address registers for speed
 # -O3: Maximum optimization for inner pixel rendering loops
 CFLAGS="-O3 -m68040 -fomit-frame-pointer -mcrt=clib2"
-INCLUDES="-Isrc -Imodules/pixel_window"
-LIBS="-lm"
+INCLUDES="-I$MYLO_ROOT/src -I$SCRIPT_DIR"
+LIBS="-lm -lnet"
 
-OUTPUT_BINARY="mylo_amiga"
+OUTPUT_BINARY="$MYLO_ROOT/mylo_amiga"
 
 # Core Mylo source files + Pixel-Window implementation
 SOURCES=(
-    src/main.c
-    src/compiler.c
-    src/vm.c
-    src/utils.c
-    src/mylolib.c
-    src/debug_adapter.c
-    modules/pixel_window/pixel_window_impl.c
+    "$MYLO_ROOT/src/main.c"
+    "$MYLO_ROOT/src/compiler.c"
+    "$MYLO_ROOT/src/vm.c"
+    "$MYLO_ROOT/src/utils.c"
+    "$MYLO_ROOT/src/mylolib.c"
+    "$MYLO_ROOT/src/debug_adapter.c"
+    "$SCRIPT_DIR/pixel_window_impl.c"
 )
 
 echo "[INFO] Compiling Mylo executable..."

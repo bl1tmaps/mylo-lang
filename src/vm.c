@@ -15,6 +15,8 @@
     #define _WINSOCKAPI_    // stops windows.h including winsock.h
     #include <windows.h>
     #define EXT ".dll"
+#elif defined(__AMIGA__)
+    #define EXT ""
 #else
     #include <dlfcn.h>
     #define EXT ".so"
@@ -2238,18 +2240,17 @@ void get_lib_name(char* out, const char* base_name) {
 }
 
 void* load_library(const char* path) {
-    FILE* f = fopen(path, "rb");
-    if (!f) return NULL;
-    fclose(f);
-
-#ifdef _WIN32
+#if defined(_WIN32)
     HMODULE h = LoadLibraryA(path);
     if (!h)
         fprintf(stderr, "Failed to load library %s (Error: %lu)\n", path, GetLastError());
     return (void*)h;
+#elif defined(__AMIGA__)
+    return NULL;
 #else
-    // RTLD_GLOBAL allows the plugin to see symbols if we exported them,
-    // but we are using the struct method now, so standard load is fine.
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    fclose(f);
     void* h = dlopen(path, RTLD_NOW);
     if (!h)
         fprintf(stderr, "Failed to load library %s (%s)\n", path, dlerror());
@@ -2257,10 +2258,60 @@ void* load_library(const char* path) {
 #endif
 }
 
+#ifdef __AMIGA__
+extern int pw_create_window_id(int width, int height, const char* title, int resizable);
+extern int pw_process_events_id(int handle);
+extern void pw_update_window_id(int handle, const void* rgb_buffer);
+extern void pw_destroy_window_id(int handle);
+extern float pw_get_mouse_x_id(int handle);
+extern float pw_get_mouse_y_id(int handle);
+extern int pw_is_mouse_down_id(int handle, int button);
+extern int pw_is_mouse_pressed_id(int handle, int button);
+extern int pw_is_key_down_id(int handle, int key);
+extern int pw_is_key_pressed_id(int handle, int key);
+extern void pw_clear_buffer(void* buffer, int width, int height, unsigned char r, unsigned char g, unsigned char b);
+extern void td_draw_pixel(void* buffer, int width, int height, int x, int y, unsigned char r, unsigned char g, unsigned char b);
+extern void td_draw_line(void* buffer, int width, int height, int x0, int y0, int x1, int y1, int thickness, unsigned char r, unsigned char g, unsigned char b);
+extern void td_draw_rect(void* buffer, int width, int height, int x, int y, int w, int h, int thickness, int filled, unsigned char r, unsigned char g, unsigned char b);
+extern void td_draw_circle(void* buffer, int width, int height, int cx, int cy, int radius, int thickness, int filled, unsigned char r, unsigned char g, unsigned char b);
+extern void td_draw_triangle(void* buffer, int width, int height, int x1, int y1, int x2, int y2, int x3, int y3, int thickness, int filled, unsigned char r, unsigned char g, unsigned char b);
+extern void draw_string_rgb(void* buffer, int width, int height, const char* text, int x, int y, int size, unsigned char r, unsigned char g, unsigned char b);
+
+static void* amiga_get_symbol(const char* symbol) {
+    if (!symbol) return NULL;
+    if (symbol[0] == '_') symbol++;
+
+    #define MATCH_SYM(name, fn) if (strcmp(symbol, name) == 0) return (void*)(fn)
+    MATCH_SYM("pw_create_window_id", pw_create_window_id);
+    MATCH_SYM("pw_process_events_id", pw_process_events_id);
+    MATCH_SYM("pw_update_window_id", pw_update_window_id);
+    MATCH_SYM("pw_destroy_window_id", pw_destroy_window_id);
+    MATCH_SYM("pw_get_mouse_x_id", pw_get_mouse_x_id);
+    MATCH_SYM("pw_get_mouse_y_id", pw_get_mouse_y_id);
+    MATCH_SYM("pw_is_mouse_down_id", pw_is_mouse_down_id);
+    MATCH_SYM("pw_is_mouse_pressed_id", pw_is_mouse_pressed_id);
+    MATCH_SYM("pw_is_key_down_id", pw_is_key_down_id);
+    MATCH_SYM("pw_is_key_pressed_id", pw_is_key_pressed_id);
+    MATCH_SYM("pw_clear_buffer", pw_clear_buffer);
+    MATCH_SYM("td_draw_pixel", td_draw_pixel);
+    MATCH_SYM("td_draw_line", td_draw_line);
+    MATCH_SYM("td_draw_rect", td_draw_rect);
+    MATCH_SYM("td_draw_circle", td_draw_circle);
+    MATCH_SYM("td_draw_triangle", td_draw_triangle);
+    MATCH_SYM("draw_string_rgb", draw_string_rgb);
+    MATCH_SYM("atoi", atoi);
+    MATCH_SYM("abs", abs);
+    #undef MATCH_SYM
+    return NULL;
+}
+#endif
+
 void* get_symbol(void* handle, const char* symbol) {
 #ifdef _WIN32
     if (!handle) handle = GetModuleHandle(NULL);
     return (void*)GetProcAddress((HMODULE)handle, symbol);
+#elif defined(__AMIGA__)
+    return amiga_get_symbol(symbol);
 #else
     if (!handle) {
 #ifdef RTLD_DEFAULT

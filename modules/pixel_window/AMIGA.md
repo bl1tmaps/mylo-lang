@@ -63,9 +63,9 @@ echo "======================================================================"
 # -mcrt=clib2: Modern C standard library for AmigaOS
 # -fomit-frame-pointer: Free up address registers for speed
 # -O3: Maximum optimization for inner pixel rendering loops
-CFLAGS="-O3 -m68040 -fomit-frame-pointer -mcrt=clib2 -noixemul"
+CFLAGS="-O3 -m68040 -fomit-frame-pointer -mcrt=clib2"
 INCLUDES="-Isrc -Imodules/pixel_window"
-LIBS="-lm"
+LIBS="-lm -lnet"
 
 OUTPUT_BINARY="mylo_amiga"
 
