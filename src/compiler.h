@@ -11,6 +11,7 @@ typedef struct {
     int addr;
     int type_id;
     bool is_array;
+    int scope_depth;
 } Symbol;
 
 // Local Variable Entry
@@ -19,6 +20,7 @@ typedef struct {
     int offset;
     int type_id;
     bool is_array;
+    int scope_depth;
 } LocalSymbol;
 
 typedef struct {

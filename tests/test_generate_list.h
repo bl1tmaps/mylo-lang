@@ -54,6 +54,19 @@ inline TestOutput test_hello_world() {
 // The test VM, exposed here for post test hooks
 VM test_vm;
 
+inline TestOutput run_error_test(const std::string& src) {
+    vm_init(&test_vm);
+    compiler_reset();
+    bool threw = false;
+    try {
+        parse(&test_vm, const_cast<char *>(src.c_str()));
+    } catch (std::exception &e) {
+        threw = true;
+    }
+    vm_cleanup(&test_vm);
+    return {threw, threw ? "" : "Expected compiler error but got none"};
+}
+
 inline TestOutput run_source_test(const std::string& src, const std::string& expected, bool clean_up = true) {
     vm_init(&test_vm);
     compiler_reset();
@@ -106,30 +119,15 @@ inline TestOutput test_logic() {
 
 
 inline TestOutput test_change_types() {
-
-    // Note: escape the quote properly for C string "print(\"hello\")"
-    std::string src = """"
-    "var x = \"hi\"\n"
-    "print(x)\n"
-    "x = 1\n"
-    "print(x)\n"
-
-    "x = f\"hi {x}\"\n"
-    "print(f\"hi {x}\")\n";
-
-    std::string expected = """"
-    "hi\n"
-    "1\n"
-    "hi hi 1\n";
-
-    return run_source_test(src, expected);
+    // Redefinition / type mutation in same scope must cause compiler error
+    return run_error_test("x: string = \"hi\"\nx = 1\n");
 }
 
 inline TestOutput test_ifs() {
 
     // Note: escape the quote properly for C string "print(\"hello\")"
     std::string src = """"
-    "var x = 5\n"
+    "x: i32 = 5\n"
     "if x <= 5 {\n"
         "print(\"it is less than or equals 5\")\n"
     "} else {\n"
@@ -146,7 +144,7 @@ inline TestOutput test_elif() {
 
     // Note: escape the quote properly for C string "print(\"hello\")"
     std::string src = """"
-    "var x = 6\n"
+    "x: i32 = 6\n"
     "if x <= 5 {\n"
         "print(\"it is less than or equals 5\")\n"
     "} elif x == 6 {\n"
@@ -171,7 +169,7 @@ inline TestOutput test_fib() {
         "ret fib(n - 1) + fib(n - 2)\n"
     "}\n"
     "print(\"Calculating Fib(10)...\")\n"
-    "var result = fib(10)\n"
+    "result: i32 = fib(10)\n"
     "print(result)";
 
     std::string expected = """"
@@ -185,7 +183,7 @@ inline TestOutput test_ternary() {
 
     // Note: escape the quote properly for C string "print(\"hello\")"
     std::string src = """"
-    "var x = 3\n"
+    "x: i32 = 3\n"
     "print(f\"hello { x > 3 ? \"little one\" else \"not little one}\")";
 
 
@@ -197,7 +195,7 @@ inline TestOutput test_ternary() {
 
 inline TestOutput test_literal_loop() {
     std::string src = """"
-    "for (var i in 0...5) {\n"
+    "for (i in 0...5) {\n"
     "print(i)"
     "}";
 
@@ -209,7 +207,7 @@ inline TestOutput test_literal_loop() {
 
 inline TestOutput test_literal_reverse() {
     std::string src = """"
-    "for (var i in 5...0) {\n"
+    "for (i in 5...0) {\n"
     "print(i)"
     "}";
 
@@ -221,11 +219,11 @@ inline TestOutput test_literal_reverse() {
 
 inline TestOutput test_variable_loop() {
     std::string src = """"
-    "var x = 3\n"
-    "for (var i in x...5) {\n"
+    "x: i32 = 3\n"
+    "for (i in x...5) {\n"
     "print(i)"
     "}"
-    "for (var i in 5...x) {\n"
+    "for (i in 5...x) {\n"
     "print(i)"
     "}";
 
@@ -239,12 +237,12 @@ inline TestOutput test_struct() {
 
     std::string src = """"
     "struct my_struct {\n"
-        "var age\n"
-        "var name\n"
+        "age: u32\n"
+        "name: string\n"
     "}\n"
 
-    "var person : my_struct = { age=30, name=\"Andy\" }\n"
-    "var age = person.age\n"
+    "person : my_struct = { age=30, name=\"Andy\" }\n"
+    "age: u32 = person.age\n"
 
     "print(person)\n"
     "print(age)\n"
@@ -262,7 +260,7 @@ inline TestOutput test_maps() {
 
     std::string src = """"
     // 1. Creation: Map literal syntax
-    "var my_map = { \"name\"=\"foo\", \"age\"=32 }\n"
+    "my_map: map = { \"name\"=\"foo\", \"age\"=32 }\n"
 
     // Print the map object (should be Ref: 0 if it's the first allocation)
     "print(my_map)\n"
@@ -299,11 +297,11 @@ inline TestOutput test_to_num() {
 
     std::string src = """"
     // 1. Creation: Map literal syntax
-    "var x = \"1\"\n"
+    "x: string = \"1\"\n"
     "if (to_num(x) == 1) {\n"
     "print(x)\n"
     "}"
-    "var y = \"2.8\"\n"
+    "y: string = \"2.8\"\n"
     "if (to_num(y) == 2.8) {\n"
     "print(y)\n"
     "}";
@@ -319,11 +317,11 @@ inline TestOutput test_to_str() {
 
     std::string src = """"
     // 1. Creation: Map literal syntax
-    "var x = 1\n"
+    "x: i32 = 1\n"
     "if (to_string(x) == \"1\") {\n"
         "print(x)\n"
     "}"
-    "var y = 2.8\n"
+    "y: f64 = 2.8\n"
     "if (to_string(y) == \"2.8\") {\n"
     "print(y)\n"
     "}";
@@ -338,10 +336,10 @@ inline TestOutput test_to_str() {
 inline TestOutput test_string_interp() {
 
     std::string src = """"
-    "var name = \"Ben\"\n"
-    "var age = 37.5\n"
-    "var string = f\"I am {name}, and I am {age + 2.5}\"\n"
-    "print(string)";
+    "name: string = \"Ben\"\n"
+    "age: f64 = 37.5\n"
+    "s: string = f\"I am {name}, and I am {age + 2.5}\"\n"
+    "print(s)";
 
     std::string expected = """"
     "I am Ben, and I am 40\n";
@@ -352,14 +350,14 @@ inline TestOutput test_string_interp() {
 inline TestOutput test_scope() {
 
     std::string src = """"
-    "var x = 5\n"
+    "x: i32 = 5\n"
 
     "fn foo() {\n"
-        "var x = 10\n"
+        "x: i32 = 10\n"
         "ret x\n"
     "}\n"
 
-    "var y = foo()\n"
+    "y: i32 = foo()\n"
     "print(x)"
     "print(y)";
 
@@ -372,7 +370,7 @@ inline TestOutput test_scope() {
 inline TestOutput test_namespace() {
 
     std::string src = """"
-    "var foo = 5\n"
+    "foo: i32 = 5\n"
     "mod MySpace {\n"
         "fn foo() {\n"
             "ret 10\n"
@@ -390,7 +388,7 @@ inline TestOutput test_namespace() {
 inline TestOutput test_while_for() {
 
     std::string src = """"
-    "var i = 0\n"
+    "i: i32 = 0\n"
     "for (i < 2) {\n"
         "print(i)\n"
         "i = i + 1\n"
@@ -406,9 +404,9 @@ inline TestOutput test_var_access() {
 
     std::string src = """"
     "struct my_struct {\n"
-        "var name\n"
+        "name: string\n"
     "}\n"
-    "var person : my_struct = {name=\"Andy\"}\n"
+    "person : my_struct = {name=\"Andy\"}\n"
 
     "fn hi(n : my_struct) {\n"
         "print(f\"Hi {n.name}\")\n"
@@ -429,7 +427,7 @@ inline TestOutput test_var_access() {
 inline TestOutput test_arrays() {
 
     std::string src = """"
-    "var my_list = [\"m\", \"o\", \"o\", \"n\"]\n"
+    "my_list: string[] = [\"m\", \"o\", \"o\", \"n\"]\n"
 
     // prints 'm'
     "print(my_list[0])\n"
@@ -438,7 +436,7 @@ inline TestOutput test_arrays() {
         "print(x)\n"
     "}\n"
 
-    "var next_list = [1, 2, 33]\n"
+    "next_list: i32[] = [1, 2, 33]\n"
     "for (x in next_list) {\n"
         "print(x)\n"
     "}\n";
@@ -453,9 +451,9 @@ inline TestOutput test_list_array() {
 
     std::string src = """"
     "struct Color {\n"
-        "var rgba\n"
+        "rgba: i32\n"
     "}\n"
-    "var my_list: Color[] = [{rgba= 255}, {rgba= 444}]\n"
+    "my_list: Color[] = [{rgba= 255}, {rgba= 444}]\n"
 
     "for (x: Color in my_list) {\n"
         "print(x.rgba)\n"
@@ -471,9 +469,9 @@ inline TestOutput test_list_concat() {
 
     std::string src = """"
     "struct Color {\n"
-        "var rgba\n"
+        "rgba: i32\n"
     "}\n"
-    "var my_list: Color[] = []\n"
+    "my_list: Color[] = []\n"
     "my_list = my_list + [{rgba=500}, {rgba=800}, {rgba=22}]\n"
     "print(my_list[1].rgba)\n";
 
@@ -500,9 +498,9 @@ inline TestOutput test_list_slices() {
 
     std::string src = """"
     "struct Color {\n"
-    "var rgba\n"
+    "rgba: i32\n"
     "}\n"
-    "var my_list: Color[] = []\n"
+    "my_list: Color[] = []\n"
     "my_list = my_list + [{rgba=500}, {rgba=400}, {rgba=300}, {rgba=700}, {rgba=900}]\n"
     "my_list = my_list[1:3]\n"
     // prints 'm'
@@ -520,7 +518,7 @@ inline TestOutput test_func_iterator_passing() {
 
     std::string src = """"
     "struct foo {\n"
-        "var name\n"
+        "name: string\n"
     "}\n"
 
     "fn list_names(n : foo[])\n"
@@ -530,7 +528,7 @@ inline TestOutput test_func_iterator_passing() {
         "}\n"
         "ret\n"
     "}\n"
-    "var myvar0: foo[] = [{name=\"Harry\"}, {name=\"Barry\"}, {name=\"John\"}]\n"
+    "myvar0: foo[] = [{name=\"Harry\"}, {name=\"Barry\"}, {name=\"John\"}]\n"
 
     // This prints 'Harry', 'Barry', 'John'
     "list_names(myvar0)\n";
@@ -543,7 +541,7 @@ inline TestOutput test_func_iterator_passing() {
 inline TestOutput test_for_break() {
 
     std::string src = """"
-    "for (var x in 0...5) {\n"
+    "for (x in 0...5) {\n"
         "print(x)\n"
         "if (x > 2) {\n"
             "break\n"
@@ -559,7 +557,7 @@ inline TestOutput test_for_break() {
 inline TestOutput test_for_var_break() {
 
     std::string src = """"
-    "var x = 0\n"
+    "x: i32 = 0\n"
     "for (x < 5) {\n"
         "print(x)\n"
         "if (x > 2) {\n"
@@ -577,7 +575,7 @@ inline TestOutput test_for_var_break() {
 inline TestOutput test_forever() {
 
     std::string src = """"
-    "var x = 0\n"
+    "x: i32 = 0\n"
     "forever {\n"
         "print(x)\n"
         "x = x + 1\n"
@@ -595,7 +593,7 @@ inline TestOutput test_forever() {
 inline TestOutput test_for_continue() {
 
     std::string src = """"
-    "for (var x in 0...5) {\n"
+    "for (x in 0...5) {\n"
         "if (x < 2) {\n"
             "continue\n"
         "}\n"
@@ -614,7 +612,7 @@ inline TestOutput test_file_str_io() {
     "write_file(\"test.txt\", \"Line1\n\", \"w\")\n"
     // "a" = append mode (replaces append_file)
     "write_file(\"test.txt\", \"Line2\n\", \"a\")\n"
-    "var lines = read_lines(\"test.txt\")\n"
+    "lines: array = read_lines(\"test.txt\")\n"
     "for (line in lines) {\n"
         "print(line)\n"
     "}\n";
@@ -628,7 +626,7 @@ inline TestOutput test_file_str_io() {
 inline TestOutput test_len() {
 
     std::string src = """"
-    "var x = [1, 2, 3, 4]\n"
+    "x: i32[] = [1, 2, 3, 4]\n"
     // "a" = append mode (replaces append_file)
     "print(len(x))\n";
     std::string expected = """"
@@ -640,10 +638,10 @@ inline TestOutput test_len() {
 inline TestOutput test_file_bin_io() {
 
     std::string src = """"
-    "var bytes = [65, 66, 67, 10]\n"
+    "bytes: u8[] = [65, 66, 67, 10]\n"
     "write_bytes(\"data.bin\", bytes)\n"
 
-    "var read_data = read_bytes(\"data.bin\", 1)\n"
+    "read_data: array = read_bytes(\"data.bin\", 1)\n"
     "for (b in read_data) {\n"
         "print(b)\n"
     "}\n";
@@ -657,7 +655,7 @@ inline TestOutput test_file_bin_io() {
 inline TestOutput test_contains() {
 
     std::string src = """"
-    "var list = [\"apple\", \"banana\", \"cherry\"]\n"
+    "list: string[] = [\"apple\", \"banana\", \"cherry\"]\n"
     "if (contains(list, \"banana\")) {\n"
         "print(\"A\")\n"
     "}\n"
@@ -685,7 +683,7 @@ inline TestOutput test_enums() {
         "bike,\n"
         "truck,\n"
     "}\n"
-    "var myvar = Transport::car\n"
+    "myvar: Transport = Transport::car\n"
     "if (myvar == Transport::bike) {\n"
         "print(\"A\")\n"
     "}\n"
@@ -740,7 +738,7 @@ inline TestOutput test_bool() {
 inline TestOutput test_bytes_print() {
 
     std::string src = """"
-    "var header = b\"PNG\"\n"
+    "header: u8[] = b\"PNG\"\n"
     "print(header)\n";
 
     std::string expected = """"
@@ -751,7 +749,7 @@ inline TestOutput test_bytes_print() {
 inline TestOutput test_bytes_hex_print() {
 
     std::string src = """"
-    "var header = b\"\\xFF\"\n"
+    "header: u8[] = b\"\\xFF\"\n"
     "print(to_num(header[0]))\n";
 
     std::string expected = """"
@@ -762,7 +760,7 @@ inline TestOutput test_bytes_hex_print() {
 inline TestOutput test_byte_iterator() {
 
     std::string src = """"
-    "var header = b\"1298\"\n"
+    "header: u8[] = b\"1298\"\n"
     "for (x in header) {\n"
     "print(x)\n"
     "}";
@@ -774,7 +772,7 @@ inline TestOutput test_byte_iterator() {
 inline TestOutput test_map_iterator() {
 
     std::string src = """"
-    "var header = {\"cat\"=\"Glad\", \"dog\"=\"Meg\"}"
+    "header: map = {\"cat\"=\"Glad\", \"dog\"=\"Meg\"}"
     "for (key, value in header) {\n"
     "print(f\"{key}, {value}\")\n"
     "}";
@@ -787,14 +785,14 @@ inline TestOutput test_map_passing() {
 
     std::string src = """"
     "fn foo() {\n"
-        "var header = {}\n"
+        "header: map = {}\n"
         "for (x in 0...3) {\n"
             "header[x] = x+1\n"
         "}\n"
         "print(header)\n"
         "ret header\n"
     "}\n"
-    "var o = foo()\n"
+    "o: map = foo()\n"
     "print(o)\n";
     std::string expected = """"
     "{0: 1, 1: 2, 2: 3, 3: 4}\n{0: 1, 1: 2, 2: 3, 3: 4}\n";
@@ -804,8 +802,8 @@ inline TestOutput test_map_passing() {
 inline TestOutput test_byte_slice_iterator() {
 
     std::string src = """"
-    "var header = b\"1298\"\n"
-    "var slice = header[1:2]"
+    "header: u8[] = b\"1298\"\n"
+    "slice: u8[] = header[1:2]"
     "for (x in slice) {\n"
         "print(x)\n"
     "}";
@@ -817,7 +815,7 @@ inline TestOutput test_byte_slice_iterator() {
 inline TestOutput test_byte_slice_assignment() {
 
     std::string src = """"
-    "var header = b\"1111\"\n"
+    "header: u8[] = b\"1111\"\n"
     "header[1:2] = b\"22\"\n"
     "for (x in header) {\n"
         "print(x)\n"
@@ -830,7 +828,7 @@ inline TestOutput test_byte_slice_assignment() {
 inline TestOutput test_array_slice_assignment() {
 
     std::string src = """"
-    "var header = [1, 2, 3, 4]\n"
+    "header: i32[] = [1, 2, 3, 4]\n"
     "header[1:2] = [5, 6]\n"
     "for (x in header) {\n"
         "print(x)\n"
@@ -843,7 +841,7 @@ inline TestOutput test_array_slice_assignment() {
 inline TestOutput test_list_reserve() {
 
     std::string src = """"
-    "var header: num[] = list(5)\n"
+    "header: i32[] = list(5)\n"
     "for (x in header) {\n"
         "print(x)\n"
     "}";
@@ -855,7 +853,7 @@ inline TestOutput test_list_reserve() {
 inline TestOutput test_list_add() {
 
     std::string src = """"
-    "var header: num[] = list(4)\n"
+    "header: i32[] = list(4)\n"
     "header = add(header, 1, 22)"
     "for (x in header) {\n"
         "print(x)\n"
@@ -868,7 +866,7 @@ inline TestOutput test_list_add() {
 inline TestOutput test_list_remove() {
 
     std::string src = """"
-    "var header: num[] = list(4)\n"
+    "header: i32[] = list(4)\n"
     "header = add(header, 1, 22)\n"
     "header = remove(header, 0)"
     "for (x in header) {\n"
@@ -882,7 +880,7 @@ inline TestOutput test_list_remove() {
 inline TestOutput test_map_remove() {
 
     std::string src = """"
-    "var header = {\"cat\"=\"Glad\", \"dog\"=\"Meg\"}\n"
+    "header: map = {\"cat\"=\"Glad\", \"dog\"=\"Meg\"}\n"
     "header = remove(header, \"cat\")\n"
     "for (key, value in header) {\n"
     "print(f\"{key}, {value}\")\n"
@@ -895,7 +893,7 @@ inline TestOutput test_map_remove() {
 inline TestOutput test_arr_str_slice_assignment() {
 
     std::string src = """"
-    "var header = [\"cart\", \"dorg\", \"fox\", \"rat\"]\n"
+    "header: string[] = [\"cart\", \"dorg\", \"fox\", \"rat\"]\n"
     "header[0:1] = [\"cat\", \"dog\"]\n"
     "for (x in header) {\n"
         "print(x)\n"
@@ -909,7 +907,7 @@ inline TestOutput test_arr_str_slice_assignment() {
 inline TestOutput test_vector_ops_add() {
 
     std::string src = """"
-    "var x = [1,2,3,4,5]\n"
+    "x: i32[] = [1,2,3,4,5]\n"
     "x = x[2:3] + x[2]\n"
     "for (y in x) {\n"
         "print(y)\n"
@@ -922,7 +920,7 @@ inline TestOutput test_vector_ops_add() {
 inline TestOutput test_vector_ops_mul() {
 
     std::string src = """"
-    "var x = [1,2,3,4,5]\n"
+    "x: i32[] = [1,2,3,4,5]\n"
     "x = x * x[2]\n"
     "for (y in x) {\n"
         "print(y)\n"
@@ -935,7 +933,7 @@ inline TestOutput test_vector_ops_mul() {
 inline TestOutput test_vector_str_add() {
 
     std::string src = """"
-    "var x = [\"cat\",\"dog\"]\n"
+    "x: string[] = [\"cat\",\"dog\"]\n"
     "x = x + \"fish\"\n"
     "for (y in x) {\n"
         "print(y)\n"
@@ -948,7 +946,7 @@ inline TestOutput test_vector_str_add() {
 inline TestOutput test_vector_byte_add() {
 
     std::string src = """"
-    "var x = [b\"\\xFE\",b\"\\xFE\"]\n"
+    "x: array = [b\"\\xFE\",b\"\\xFE\"]\n"
     "x = x + b\"\\xFE\"\n"
     "for (y in x) {\n"
         "print(y)\n"
@@ -961,7 +959,7 @@ inline TestOutput test_vector_byte_add() {
 inline TestOutput test_bytes_vector_add() {
 
     std::string src = """"
-    "var header = b\"\\xFE\\xFE\"\n"
+    "header: u8[] = b\"\\xFE\\xFE\"\n"
     "header = header + 1"
     "print(to_num(header[0]))\n";
     std::string expected = """"
@@ -973,7 +971,7 @@ inline TestOutput test_bytes_vector_add() {
 inline TestOutput test_where_str() {
 
     std::string src = """"
-        "var header = \"ohblast\""
+        "header: string = \"ohblast\""
         "print(where(header,\"blast\"))\n";
     std::string expected = """"
         "2\n";
@@ -983,7 +981,7 @@ inline TestOutput test_where_str() {
 inline TestOutput test_where_list() {
 
     std::string src = """"
-        "var header = [1,2,3,4,5]\n"
+        "header: i32[] = [1,2,3,4,5]\n"
         "print(where(header,4))\n";
     std::string expected = """"
         "3\n";
@@ -993,8 +991,8 @@ inline TestOutput test_where_list() {
 inline TestOutput test_split_str() {
 
     std::string src = """"
-        "var header = \"a,b,c\"\n"
-        "var parts = split(header, \",\")\n"
+        "header: string = \"a,b,c\"\n"
+        "parts: array = split(header, \",\")\n"
         "print(parts[0])\n"
         "print(parts[1])\n";
     std::string expected = """"
@@ -1005,7 +1003,7 @@ inline TestOutput test_split_str() {
 inline TestOutput test_print_array() {
 
     std::string src = """"
-        "var header = \"[1,2,3,4,5,6,7,8,99]\"\n"
+        "header: string = \"[1,2,3,4,5,6,7,8,99]\"\n"
         "print(header)\n";
     std::string expected = """"
         "[1,2,3,4,5,6,7,8,99]\n";
@@ -1015,7 +1013,7 @@ inline TestOutput test_print_array() {
 inline TestOutput test_print_map() {
 
     std::string src = """"
-        "var header = {\"foo\"=99, \"bar\"=88}\n"
+        "header: map = {\"foo\"=99, \"bar\"=88}\n"
         "print(header)\n";
     std::string expected = """"
         "{foo: 99, bar: 88}\n";
@@ -1025,7 +1023,7 @@ inline TestOutput test_print_map() {
 inline TestOutput test_range() {
 
     std::string src = """"
-        "var header = range(0,2,10)\n"
+        "header: array = range(0,2,10)\n"
         "print(header)\n";
     std::string expected = """"
         "[0, 2, 4, 6, 8, 10]\n";
@@ -1034,7 +1032,7 @@ inline TestOutput test_range() {
 
 inline TestOutput test_range_rev() {
     std::string src = """"
-        "var header = range(10,2,-2)\n"
+        "header: array = range(10,2,-2)\n"
         "print(header)\n";
     std::string expected = """"
         "[10, 8, 6, 4, 2, 0, -2]\n";
@@ -1043,7 +1041,7 @@ inline TestOutput test_range_rev() {
 
 inline TestOutput test_range_dec() {
     std::string src = """"
-        "var header = range(-0.1,0.1,0)\n"
+        "header: array = range(-0.1,0.1,0)\n"
         "print(header)\n";
     std::string expected = """"
         "[-0.1, 0]\n";
@@ -1053,8 +1051,8 @@ inline TestOutput test_range_dec() {
 inline TestOutput test_for_list() {
     std::string src = """"
         "fn foo(x) { ret x*2} \n"
-        "var header = range(0,1,3)\n"
-        "var x = for_list(\"foo\", header)\n"
+        "header: array = range(0,1,3)\n"
+        "x: array = for_list(\"foo\", header)\n"
         "print(x)";
     std::string expected = """"
         "[0, 2, 4, 6]\n";
@@ -1064,8 +1062,8 @@ inline TestOutput test_for_list() {
 inline TestOutput test_for_list_str() {
     std::string src = """"
         "fn foo(x) { ret f\"{x}fish\"} \n"
-        "var header = [\"cat\",\"dog\"]\n"
-        "var x = for_list(\"foo\", header)\n"
+        "header: string[] = [\"cat\",\"dog\"]\n"
+        "x: array = for_list(\"foo\", header)\n"
         "print(x)";
     std::string expected = """"
         "[\"catfish\", \"dogfish\"]\n";
@@ -1106,7 +1104,7 @@ inline TestOutput test_mix() {
 
 inline TestOutput test_list_min_max() {
     std::string src = """"
-    "var nums = [10, 5, 20, 2]\n"
+    "nums: i32[] = [10, 5, 20, 2]\n"
     "print(min_list(nums))\n" // 2
     "print(max_list(nums))\n"; // 20\n";
     std::string expected = """"
@@ -1117,9 +1115,9 @@ inline TestOutput test_list_min_max() {
 
 inline TestOutput test_strong_types_list() {
     std::string src = """"
-    "var pixels: byte[] = [255, 0, 128]\n"  // Stored as bytes in heap
-    "var mesh: f32[] = [1.5, 0.2, -3.4]\n" // Stored as floats in heap
-    "var counts: i32[] = [1000, 2000]\n"   // Stored as ints in heap
+    "pixels: u8[] = [255, 0, 128]\n"  // Stored as bytes in heap
+    "mesh: f32[] = [1.5, 0.2, -3.4]\n" // Stored as floats in heap
+    "counts: i32[] = [1000, 2000]\n"   // Stored as ints in heap
     "print(pixels)\n"
     "print(mesh)\n"
     "print(counts)\n";
@@ -1133,8 +1131,8 @@ inline TestOutput test_strong_types_list() {
 
 inline TestOutput test_loop_scoping() {
     std::string src = 
-    "var x = 0\n"
-    "forever {var f = range(0,1,1000)\n x = x + 1 \n if (x > 2) {break}}\n"
+    "x: i32 = 0\n"
+    "forever {f: array = range(0,1,1000)\n x = x + 1 \n if (x > 2) {break}}\n"
     "x = 0 \n for (f in range(0,1,1000)){\n x = x + 1 \n if (x > 2) {break}}\n"
     "print(1)";
     std::string expected = 
@@ -1146,9 +1144,9 @@ inline TestOutput test_loop_scoping() {
 
 inline TestOutput test_strong_types_i() {
     std::string src = """"
-            "var z : i64 = 67.2 + 33.7\n"
-            "var x : i32 = 67.2 + 33.7\n"
-            "var y : i16 = 67.2 + 33.7\n"
+            "z : i64 = 67.2 + 33.7\n"
+            "x : i32 = 67.2 + 33.7\n"
+            "y : i16 = 67.2 + 33.7\n"
             "print(z)\n"
             "print(x)\n"
             "print(y)\n";
@@ -1159,7 +1157,7 @@ inline TestOutput test_strong_types_i() {
 
 inline TestOutput test_type_promototion_bool() {
     std::string src = """"
-    "var x = b\"\\xFE\"\n"
+    "x: u8[] = b\"\\xFE\"\n"
     "print(x + 2)\n";
     std::string expected = """"
         "[256]\n"; // As it is an array, it is promoted to num array :')
@@ -1169,10 +1167,10 @@ inline TestOutput test_type_promototion_bool() {
 inline TestOutput test_typed_struct() {
     std::string src = """"
     "struct A {\n"
-    "var a : i16\n"
-    "var b : i32\n"
+    "a : i16\n"
+    "b : i32\n"
     "}\n"
-    "var x : A = {a=88.2, b=11.33}\n"
+    "x : A = {a=88.2, b=11.33}\n"
     "print(f\"{x.a},{x.b}\")\n";
     std::string expected = """"
         "88,11\n"; // As it is an array, it is promoted to num array :')
@@ -1183,12 +1181,12 @@ inline TestOutput test_thread() {
     std::string src = 
     "bus_set(\"input\", 100)\n"
     "fn foo_1() {\n"
-    "   var input = bus_get(\"input\")\n"
+    "   input: i32 = bus_get(\"input\")\n"
     "   bus_set(\"result\", input + 42)\n"
     "}\n"
-    "var worker_id = create_worker(\"foo_1\")\n"
+    "worker_id: i32 = create_worker(\"foo_1\")\n"
     "if (worker_id < 0) {print(-1)}\n"
-    "var running = 1\n forever { if (running != 1) { break } \n  var status = check_worker(worker_id) \n"
+    "running: i32 = 1\n forever { if (running != 1) { break } \n  status: i32 = check_worker(worker_id) \n"
     "if (status == 1) { running = 0} }\n"
     "dock_worker(worker_id)\n"
     "print(bus_get(\"result\"))";
@@ -1202,12 +1200,12 @@ inline TestOutput test_bus() {
     "fn foo_1() {\n"
     "   bus_set(\"test\", 42)\n"
     "}\n"
-    "var worker_id = create_worker(\"foo_1\")\n"
+    "worker_id: i32 = create_worker(\"foo_1\")\n"
     "if (worker_id < 0) {print(-1)}\n"
-    "var running = 1\n forever { if (running != 1) { break } \n  var status = check_worker(worker_id) \n"
+    "running: i32 = 1\n forever { if (running != 1) { break } \n  status: i32 = check_worker(worker_id) \n"
     "if (status == 1) { running = 0} }\n"
     "dock_worker(worker_id)\n"
-    "var t = bus_get(\"test\")\n"
+    "t: i32 = bus_get(\"test\")\n"
     "print(t)";
     std::string expected = 
         "42\n"; 
@@ -1219,8 +1217,8 @@ inline TestOutput test_bus() {
 inline TestOutput test_nested_for_loop() {
 
     std::string src = """"
-    "for (var x in 0...2) {\n"
-    "for (var y in 0...2) {\n"
+    "for (x in 0...2) {\n"
+    "for (y in 0...2) {\n"
         "print(f\"{x}, {y}\")\n"
     "}"
     "}\n";
@@ -1242,14 +1240,14 @@ inline TestOutput test_type_chaining() {
 
     std::string src = """"
     "struct Vec3 {"
-    "var x\n"
-    "var y\n"
-    "var z\n"
+    "x: i32\n"
+    "y: i32\n"
+    "z: i32\n"
     "}\n"
     "struct Foo {\n"
-    "var c : Vec3\n"
+    "c : Vec3\n"
     "}\n"
-    "var t : Foo = {}\n"
+    "t : Foo = {}\n"
     "t.c = {x=255, y=0, z=0}\n"
     "print(t.c.x)\n"
     "t.c.y = 99\n"
@@ -1279,7 +1277,7 @@ inline TestOutput test_nested_scope_conditional_return() {
 inline TestOutput test_print_interp_len() {
 
     std::string src = """"
-    "var x = \"hi\"\n"
+    "x: string = \"hi\"\n"
     "print(f\"123456789123456789123456789123456789123456789123456789123456789123456789123456789123456789{x}\")";
 
     std::string expected = """"
@@ -1290,17 +1288,17 @@ inline TestOutput test_print_interp_len() {
 
 inline TestOutput test_forever_stack_leak() {
     std::string src =
-    "var i = 0\n"
+    "i: i32 = 0\n"
     "forever {\n"
     "    // 1. Define a local variable (allocated on stack)\n"
-    "    var x = 10\n"
+    "    x: i32 = 10\n"
     "    \n"
     "    // 2. Define a local array (allocated on heap + ref on stack)\n"
-    "    var y = [1, 2]\n"
+    "    y: i32[] = [1, 2]\n"
     "    \n"
     "    // 3. Loop causing inner scope allocations\n"
     "    for (z in y) {\n"
-    "        var a = z + 1\n"
+    "        a: i32 = z + 1\n"
     "    }\n"
     "    \n"
     "    // 4. Loop Condition\n"
@@ -1338,22 +1336,22 @@ inline TestOutput test_conditional_scoped_var_fn() {
 
     std::string src = """"
     "struct Dummy {\n"
-    "    var val \n"
+    "    val: i32\n"
     "}\n"
 
     "fn test_if_scope() {\n"
-    "    var trigger = 0\n"
+    "    trigger: i32 = 0\n"
 
         // The compiler will assign 'inner_var' to stack offset 1
     "    if (trigger == 1) {\n"
-    "        var inner_var = 99\n"
+    "        inner_var: i32 = 99\n"
     "        print(inner_var)\n"
     "    }\n"
 
         // The compiler will assign 'obj' to stack offset 2.
         // However, because the 'if' condition was false, 'inner_var' was never
         // pushed to the physical VM stack. 'obj' is actually sitting at offset 1!
-        "var obj: Dummy = {val: 42}\n"
+        "obj: Dummy = {val: 42}\n"
 
         // The VM attempts to read offset 2, finds uninitialized memory (0.0),
         // and throws a "Type Mismatch" when trying to access '.val'
@@ -1370,22 +1368,22 @@ inline TestOutput test_conditional_scoped_var_forever() {
 
     std::string src = """"
     "struct Dummy {\n"
-    "    var val \n"
+    "    val: i32\n"
     "}\n"
 
     "forever {\n"
-    "    var trigger = 0\n"
+    "    trigger: i32 = 0\n"
 
         // The compiler will assign 'inner_var' to stack offset 1
     "    if (trigger == 1) {\n"
-    "        var inner_var = 99\n"
+    "        inner_var: i32 = 99\n"
     "        print(inner_var)\n"
     "    }\n"
 
         // The compiler will assign 'obj' to stack offset 2.
         // However, because the 'if' condition was false, 'inner_var' was never
         // pushed to the physical VM stack. 'obj' is actually sitting at offset 1!
-        "var obj: Dummy = {val: 42}\n"
+        "obj: Dummy = {val: 42}\n"
 
         // The VM attempts to read offset 2, finds uninitialized memory (0.0),
         // and throws a "Type Mismatch" when trying to access '.val'
@@ -1402,22 +1400,22 @@ inline TestOutput test_conditional_scoped_var_for() {
 
     std::string src = """"
     "struct Dummy {\n"
-    "    var val \n"
+    "    val: i32\n"
     "}\n"
 
     "for (x in 0...1) {\n"
-    "    var trigger = 0\n"
+    "    trigger: i32 = 0\n"
 
         // The compiler will assign 'inner_var' to stack offset 1
     "    if (trigger == 1) {\n"
-    "        var inner_var = 99\n"
+    "        inner_var: i32 = 99\n"
     "        print(inner_var)\n"
     "    }\n"
 
         // The compiler will assign 'obj' to stack offset 2.
         // However, because the 'if' condition was false, 'inner_var' was never
         // pushed to the physical VM stack. 'obj' is actually sitting at offset 1!
-        "var obj: Dummy = {val: 42}\n"
+        "obj: Dummy = {val: 42}\n"
 
         // The VM attempts to read offset 2, finds uninitialized memory (0.0),
         // and throws a "Type Mismatch" when trying to access '.val'
@@ -1453,12 +1451,12 @@ inline TestOutput test_type_infer() {
     "too,\n"
     "}\n"
     "print(type(GOO::poo))\n"
-    "var x = \"hi\"\n"
-    "var y = 99\n"
+    "x: string = \"hi\"\n"
+    "y: i32 = 99\n"
     "print(type(x))\n"
     "print(type(y))\n";
     std::string expected = """"
-    "GOO\nstr\nnum\n";
+    "GOO\nstring\ni32\n";
 
     return run_source_test(src, expected);
 }
@@ -1485,8 +1483,8 @@ inline TestOutput test_enum_iter() {
 inline TestOutput test_oo() {
     std::string src = 
     "struct Point {\n"
-    "    var x\n"
-    "    var y\n"
+    "    x: i32\n"
+    "    y: i32\n"
     "    fn get_x(self) {\n"
     "        ret self.x\n"
     "    }\n"
@@ -1494,14 +1492,70 @@ inline TestOutput test_oo() {
     "        ret self.x + self.y + other.x + other.y\n"
     "    }\n"
     "}\n"
-    "var p1 : Point = { x=1, y=2 }\n"
-    "var p2 : Point = { x=3, y=4 }\n"
+    "p1 : Point = { x=1, y=2 }\n"
+    "p2 : Point = { x=3, y=4 }\n"
     "print(p1.get_x())\n"
     "print(p1.distance(p2))\n";
     std::string expected = """"
         "1\n"
         "10\n";  
     return run_source_test(src, expected);
+}
+
+
+inline TestOutput test_out_of_scope_error() {
+    return run_error_test("{x: u8 = 5} print(x)\n");
+}
+
+inline TestOutput test_unannotated_declaration_error() {
+    return run_error_test("x = 8\n");
+}
+
+inline TestOutput test_same_scope_redecl_error() {
+    return run_error_test("x: string = \"foo\"\nx: u32 = 4\n");
+}
+
+inline TestOutput test_arena_scope_error() {
+    return run_error_test("{[my_arena]\nx : u32 = 5\n}\nprint(x)\n");
+}
+
+inline TestOutput test_arena_execution() {
+    std::string src =
+    "{[my_arena]\n"
+    "    x: u32 = 5\n"
+    "    arr: u32[] = [1, 2, 3]\n"
+    "    print(x)\n"
+    "    print(arr[1])\n"
+    "}\n"
+    "print(\"arena done\")\n";
+    std::string expected = "5\n2\narena done\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_all_strict_types() {
+    std::string src =
+    "a: u8 = 255\n"
+    "b: u16 = 65535\n"
+    "c: u32 = 4294967295\n"
+    "d: u64 = 1000\n"
+    "e: i8 = -128\n"
+    "f: i16 = -32768\n"
+    "g: i32 = -2147483648\n"
+    "h: i64 = 5000\n"
+    "i: f16 = 1.5\n"
+    "j: f32 = 2.5\n"
+    "k: f64 = 3.5\n"
+    "s: string = \"strict\"\n"
+    "print(a)\n"
+    "print(e)\n"
+    "print(k)\n"
+    "print(s)\n";
+    std::string expected = "255\n-128\n3.5\nstrict\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_num_type_removed_error() {
+    return run_error_test("x: num = 5\n");
 }
 
 inline void test_generate_list() {
@@ -1595,6 +1649,14 @@ inline void test_generate_list() {
     ADD_TEST("Test Enum Iteration", test_enum_iter);
     ADD_TEST("Test Type Inference (type())", test_type_infer);
     ADD_TEST("Test Object Orientation", test_oo);
+    ADD_TEST("Test Out of Scope Error", test_out_of_scope_error);
+    ADD_TEST("Test Unannotated Declaration Error", test_unannotated_declaration_error);
+    ADD_TEST("Test Same Scope Redeclaration Error", test_same_scope_redecl_error);
+    ADD_TEST("Test Arena Scope Error", test_arena_scope_error);
+    ADD_TEST("Test Arena Execution", test_arena_execution);
+    ADD_TEST("Test All Strict Types", test_all_strict_types);
+    ADD_TEST("Test Num Type Removed Error", test_num_type_removed_error);
+
 
 }
 

@@ -31,21 +31,38 @@
 
 // Types
 #define TYPE_ANY -99
-#define TYPE_NUM -98
 #define TYPE_STR -97
+#define TYPE_STRING TYPE_STR
 #define TYPE_VOID -96
 
 #define TYPE_ARRAY -1
 #define TYPE_BYTES -2
 #define TYPE_MAP -3
 
+#define TYPE_U8   -30
+#define TYPE_U16  -31
+#define TYPE_U32  -32
+#define TYPE_U64  -33
+
+#define TYPE_I8   -34
+#define TYPE_I16  -10
+#define TYPE_I32  -11
+#define TYPE_I64  -12
+
+#define TYPE_F16  -13
+#define TYPE_F32  -14
+#define TYPE_F64  -35
+
+#define TYPE_STRUCT -40
+#define TYPE_ENUM   -41
+#define TYPE_BOOL   -21
+#define TYPE_BOOL_ARRAY -20
+
 #define TYPE_I16_ARRAY  -10
 #define TYPE_I32_ARRAY  -11
 #define TYPE_I64_ARRAY  -12
 #define TYPE_F16_ARRAY  -13
 #define TYPE_F32_ARRAY  -14
-
-#define TYPE_BOOL_ARRAY -20
 
 // Heap Layout Constants
 #define HEAP_OFFSET_TYPE 0
@@ -67,12 +84,30 @@
 // FFI
 #define MAX_STD_ARGS 12
 
-// --- POINTER PACKING (Safe GC) ---
-// Since we use a GC heap now, the pointer is just an index offset.
-// Max index is 2^53 (double mantissa) which is plenty.
+// --- POINTER PACKING (Safe Generational Arenas) ---
+// Offset: 28 bits (up to 256MB per arena)
+// Arena:   6 bits (64 arenas)
+// Gen:    14 bits (16k generations)
 
-#define PACK_PTR(offset) ((double)((unsigned long long)(offset)))
-#define UNPACK_OFFSET(ptr) ((int)((unsigned long long)(ptr)))
+#define PTR_OFFSET_BITS 28
+#define PTR_ARENA_BITS 6
+#define PTR_GEN_BITS 14
+
+#define PACK_PTR(gen, arena, offset) \
+    ((double)( \
+        ((unsigned long long)(offset)) | \
+        ((unsigned long long)(arena) << PTR_OFFSET_BITS) | \
+        ((unsigned long long)(gen) << (PTR_OFFSET_BITS + PTR_ARENA_BITS)) \
+    ))
+
+#define UNPACK_OFFSET(ptr) \
+    ((int)((unsigned long long)(ptr) & 0xFFFFFFF))
+
+#define UNPACK_ARENA(ptr) \
+    ((int)(((unsigned long long)(ptr) >> PTR_OFFSET_BITS) & 0x3F))
+
+#define UNPACK_GEN(ptr) \
+    ((int)(((unsigned long long)(ptr) >> (PTR_OFFSET_BITS + PTR_ARENA_BITS)) & 0x3FFF))
 
 
 // For bundles

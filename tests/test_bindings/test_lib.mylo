@@ -1,6 +1,6 @@
-fn add(a: num, b: num) {
+fn add(a: i32, b: i32) {
 
-    var r = C(a: num = a, b: num = b) -> num {
+    r: i32 = C(a: i32 = a, b: i32 = b) -> i32 {
     return a + b;
     }
     ret r

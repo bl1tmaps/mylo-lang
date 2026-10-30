@@ -305,9 +305,9 @@ void std_type(VM *vm) {
 
   int str_id = -1;
   if (type == T_NUM) {
-    str_id = make_string(vm, "num");
+    str_id = make_string(vm, "i32");
   } else if (type == T_STR) {
-    str_id = make_string(vm, "str");
+    str_id = make_string(vm, "string");
   } else if (type == T_ENUM) {
     // Shift right 32 bits to grab the Type Name string ID!
     unsigned long long packed = (unsigned long long)val;
@@ -342,6 +342,36 @@ void std_type(VM *vm) {
   vm_push(vm, (double)str_id, T_STR);
 }
 
+static inline bool is_any_array_type(int type) {
+  return (type <= TYPE_ARRAY && type != TYPE_MAP && type != TYPE_STR && type != TYPE_VOID);
+}
+
+static inline double get_array_element(double *base, int *types, int type, int i, int *out_type) {
+  if (type == TYPE_ARRAY) {
+    if (out_type && types) *out_type = types[HEAP_HEADER_ARRAY + i];
+    return base[HEAP_HEADER_ARRAY + i];
+  }
+  if (out_type) *out_type = T_NUM;
+  char *data = (char *)&base[HEAP_HEADER_ARRAY];
+  switch (type) {
+    case TYPE_U8:
+    case TYPE_BYTES:
+    case TYPE_BOOL:
+    case TYPE_BOOL_ARRAY: return (double)((unsigned char *)data)[i];
+    case TYPE_I8:         return (double)((signed char *)data)[i];
+    case TYPE_U16:        return (double)((unsigned short *)data)[i];
+    case TYPE_I16:        return (double)((short *)data)[i];
+    case TYPE_F16:        return (double)((float)((short *)data)[i]);
+    case TYPE_U32:        return (double)((unsigned int *)data)[i];
+    case TYPE_I32:        return (double)((int *)data)[i];
+    case TYPE_F32:        return (double)((float *)data)[i];
+    case TYPE_U64:        return (double)((unsigned long long *)data)[i];
+    case TYPE_I64:        return (double)((long long *)data)[i];
+    case TYPE_F64:        return ((double *)data)[i];
+    default:              return ((double *)data)[i];
+  }
+}
+
 void std_len(VM *vm) {
   double val = vm_pop(vm);
 
@@ -354,8 +384,7 @@ void std_len(VM *vm) {
 
     int type = (int)base[HEAP_OFFSET_TYPE];
 
-    if (type == TYPE_ARRAY || type == TYPE_BYTES ||
-        (type <= TYPE_I16_ARRAY && type >= TYPE_BOOL_ARRAY)) {
+    if (is_any_array_type(type)) {
       vm_push(vm, base[HEAP_OFFSET_LEN], T_NUM);
     } else if (type == TYPE_MAP) {
       vm_push(vm, base[HEAP_OFFSET_COUNT], T_NUM);
@@ -399,12 +428,13 @@ void std_contains(VM *vm) {
 
     int objType = (int)base[HEAP_OFFSET_TYPE];
 
-    if (objType == TYPE_ARRAY) {
+    if (is_any_array_type(objType)) {
       int len = (int)base[HEAP_OFFSET_LEN];
       int found = 0;
       for (int i = 0; i < len; i++) {
-        if (types[HEAP_HEADER_ARRAY + i] == needle_type &&
-            base[HEAP_HEADER_ARRAY + i] == needle_val) {
+        int et = T_NUM;
+        double el = get_array_element(base, types, objType, i, &et);
+        if (el == needle_val && (objType != TYPE_ARRAY || et == needle_type)) {
           found = 1;
           break;
         }
@@ -601,7 +631,12 @@ void std_write_bytes(VM *vm) {
   double path_id = vm_pop(vm);
 
   double *base = vm_resolve_ptr(vm, arr_ref);
-  if (!base || (int)base[HEAP_OFFSET_TYPE] != TYPE_ARRAY) {
+  if (!base) {
+    printf("Runtime Error: write_bytes expects array\n");
+    exit(1);
+  }
+  int arr_type = (int)base[HEAP_OFFSET_TYPE];
+  if (arr_type != TYPE_ARRAY && arr_type != TYPE_BYTES && arr_type != TYPE_U8 && arr_type != TYPE_I8) {
     printf("Runtime Error: write_bytes expects array\n");
     exit(1);
   }
@@ -615,9 +650,16 @@ void std_write_bytes(VM *vm) {
     return;
   }
 
-  for (int i = 0; i < len; i++) {
-    unsigned char b = (unsigned char)base[HEAP_HEADER_ARRAY + i];
-    fputc(b, f);
+  if (arr_type == TYPE_BYTES || arr_type == TYPE_U8 || arr_type == TYPE_I8) {
+    unsigned char *raw = (unsigned char *)&base[HEAP_HEADER_ARRAY];
+    for (int i = 0; i < len; i++) {
+      fputc(raw[i], f);
+    }
+  } else {
+    for (int i = 0; i < len; i++) {
+      unsigned char b = (unsigned char)base[HEAP_HEADER_ARRAY + i];
+      fputc(b, f);
+    }
   }
 
   fclose(f);
@@ -850,21 +892,12 @@ void std_where(VM *vm) {
 
     int type = (int)base[0];
 
-    if (type == TYPE_ARRAY) {
+    if (is_any_array_type(type)) {
       int len = (int)base[1];
       for (int i = 0; i < len; i++) {
-        double el = base[2 + i];
-        int et = types[2 + i];
-        if (el == item_val && et == item_type) {
-          vm_push(vm, (double)i, T_NUM);
-          return;
-        }
-      }
-    } else if (type == TYPE_BYTES) {
-      int len = (int)base[1];
-      unsigned char *b = (unsigned char *)&base[HEAP_HEADER_ARRAY];
-      for (int i = 0; i < len; i++) {
-        if ((double)b[i] == item_val) {
+        int et = T_NUM;
+        double el = get_array_element(base, types, type, i, &et);
+        if (el == item_val && (type != TYPE_ARRAY || et == item_type)) {
           vm_push(vm, (double)i, T_NUM);
           return;
         }
@@ -1051,20 +1084,22 @@ void std_list_min(VM *vm) {
   double list_ref = vm_pop(vm);
   double *base = vm_resolve_ptr(vm, list_ref);
 
-  if (vm->stack_types[vm->sp + 1] != T_OBJ || (int)base[0] != TYPE_ARRAY) {
+  if (vm->stack_types[vm->sp + 1] != T_OBJ || !base || !is_any_array_type((int)base[0])) {
     printf("Runtime Error: list_min() expects an array.\n");
     exit(1);
   }
 
+  int type = (int)base[0];
   int len = (int)base[HEAP_OFFSET_LEN];
   if (len == 0) {
     printf("Runtime Error: list_min() called on empty array.\n");
     exit(1);
   }
 
-  double min_val = base[HEAP_HEADER_ARRAY + 0];
+  int *types = vm_resolve_type(vm, list_ref);
+  double min_val = get_array_element(base, types, type, 0, NULL);
   for (int i = 1; i < len; i++) {
-    double val = base[HEAP_HEADER_ARRAY + i];
+    double val = get_array_element(base, types, type, i, NULL);
     if (val < min_val)
       min_val = val;
   }
@@ -1075,20 +1110,22 @@ void std_list_max(VM *vm) {
   double list_ref = vm_pop(vm);
   double *base = vm_resolve_ptr(vm, list_ref);
 
-  if (vm->stack_types[vm->sp + 1] != T_OBJ || (int)base[0] != TYPE_ARRAY) {
+  if (vm->stack_types[vm->sp + 1] != T_OBJ || !base || !is_any_array_type((int)base[0])) {
     printf("Runtime Error: list_max() expects an array.\n");
     exit(1);
   }
 
+  int type = (int)base[0];
   int len = (int)base[HEAP_OFFSET_LEN];
   if (len == 0) {
     printf("Runtime Error: list_max() called on empty array.\n");
     exit(1);
   }
 
-  double max_val = base[HEAP_HEADER_ARRAY + 0];
+  int *types = vm_resolve_type(vm, list_ref);
+  double max_val = get_array_element(base, types, type, 0, NULL);
   for (int i = 1; i < len; i++) {
-    double val = base[HEAP_HEADER_ARRAY + i];
+    double val = get_array_element(base, types, type, i, NULL);
     if (val > max_val)
       max_val = val;
   }

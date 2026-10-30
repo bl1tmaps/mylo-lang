@@ -15,7 +15,7 @@
 // --- Tokenizer & Structures ---
 
 typedef enum {
-    TK_FN, TK_CFN, TK_VAR, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
+    TK_FN, TK_CFN, TK_IF, TK_FOR, TK_RET, TK_PRINT, TK_IN, TK_STRUCT, TK_ELSE,
     TK_ELIF,
     TK_MOD, TK_IMPORT, TK_FOREVER,
     TK_ID, TK_NUM, TK_STR, TK_RANGE,
@@ -45,7 +45,7 @@ typedef enum {
 
 // Token Names for pretty printing
 const char *TOKEN_NAMES[] = {
-    "fn", "cfn", "var", "if", "for", "ret", "print", "in", "struct", "else", "elif",
+    "fn", "cfn", "if", "for", "ret", "print", "in", "struct", "else", "elif",
     "mod", "import", "forever",
     "Identifier", "Number", "String", "Range (...)",
     "(", ")", "{", "}", "[", "]",
@@ -65,7 +65,7 @@ extern void mylo_exit(int code);
 void match(MyloTokenType t);
 
 const char *get_token_name(MyloTokenType t) {
-    if (t < 0 || t > TK_DEBUGGER) return "Unknown";
+    if (t < 0 || t > TK_AND) return "Unknown";
     return TOKEN_NAMES[t];
 }
 
@@ -275,12 +275,12 @@ void emit(int op) {
 }
 
 int find_local(char *name) {
-    for (int i = 0; i < local_count; i++) if (strcmp(locals[i].name, name) == 0) return i;
+    for (int i = local_count - 1; i >= 0; i--) if (strcmp(locals[i].name, name) == 0) return i;
     return -1;
 }
 
 int find_global(char *name) {
-    for (int i = 0; i < global_count; i++) if (strcmp(globals[i].name, name) == 0) return i;
+    for (int i = global_count - 1; i >= 0; i--) if (strcmp(globals[i].name, name) == 0) return i;
     return -1;
 }
 
@@ -554,7 +554,6 @@ void next_token() {
         if (strcmp(curr.text, "fn") == 0) curr.type = TK_FN;
         else if (strcmp(curr.text, "struct") == 0) curr.type = TK_STRUCT;
         else if (strcmp(curr.text, "cfn") == 0) curr.type = TK_CFN;
-        else if (strcmp(curr.text, "var") == 0) curr.type = TK_VAR;
         else if (strcmp(curr.text, "if") == 0) curr.type = TK_IF;
         else if (strcmp(curr.text, "else") == 0) curr.type = TK_ELSE;
         else if (strcmp(curr.text, "elif") == 0) curr.type = TK_ELIF;
@@ -576,16 +575,24 @@ void next_token() {
         else if (strcmp(curr.text, "clear") == 0) curr.type = TK_CLEAR;
         else if (strcmp(curr.text, "monitor") == 0) curr.type = TK_MONITOR;
         else if (strcmp(curr.text, "debugger") == 0) curr.type = TK_DEBUGGER;
-        else if (strcmp(curr.text, "any") == 0) curr.type = TK_TYPE_DEF;
-        else if (strcmp(curr.text, "num") == 0) curr.type = TK_TYPE_DEF;
-        else if (strcmp(curr.text, "str") == 0) curr.type = TK_TYPE_DEF;
-        else if (strcmp(curr.text, "f64") == 0) curr.type = TK_TYPE_DEF;
-        else if (strcmp(curr.text, "f32") == 0) curr.type = TK_TYPE_DEF;
-        else if (strcmp(curr.text, "i32") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "u8") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "u16") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "u32") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "u64") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "i8") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "i16") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "i32") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "i64") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "f16") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "f32") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "f64") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "string") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "str") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "byte") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "bool") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "array") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "map") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "any") == 0) curr.type = TK_TYPE_DEF;
         else curr.type = TK_ID;
         curr.length = (int) (src - curr.start);
         return;
@@ -653,16 +660,29 @@ void next_token() {
 }
 
 int get_type_id_from_token(const char *txt) {
+    if (strcmp(txt, "u8") == 0) return TYPE_U8;
+    if (strcmp(txt, "u16") == 0) return TYPE_U16;
+    if (strcmp(txt, "u32") == 0) return TYPE_U32;
+    if (strcmp(txt, "u64") == 0) return TYPE_U64;
+    if (strcmp(txt, "i8") == 0) return TYPE_I8;
+    if (strcmp(txt, "i16") == 0) return TYPE_I16;
+    if (strcmp(txt, "i32") == 0) return TYPE_I32;
+    if (strcmp(txt, "i64") == 0) return TYPE_I64;
+    if (strcmp(txt, "f16") == 0) return TYPE_F16;
+    if (strcmp(txt, "f32") == 0) return TYPE_F32;
+    if (strcmp(txt, "f64") == 0) return TYPE_F64;
+    if (strcmp(txt, "string") == 0 || strcmp(txt, "str") == 0) return TYPE_STR;
+    if (strcmp(txt, "byte") == 0) return TYPE_U8;
+    if (strcmp(txt, "bool") == 0) return TYPE_BOOL;
+    if (strcmp(txt, "array") == 0) return TYPE_ARRAY;
+    if (strcmp(txt, "map") == 0) return TYPE_MAP;
+    if (strcmp(txt, "struct") == 0) return TYPE_STRUCT;
+    if (strcmp(txt, "enum") == 0) return TYPE_ENUM;
     if (strcmp(txt, "any") == 0) return TYPE_ANY;
-    if (strcmp(txt, "num") == 0) return TYPE_NUM;
-    if (strcmp(txt, "str") == 0) return TYPE_STR;
-    if (strcmp(txt, "byte") == 0) return TYPE_BYTES;
-    if (strcmp(txt, "i32") == 0) return TYPE_I32_ARRAY;
-    if (strcmp(txt, "f32") == 0) return TYPE_F32_ARRAY;
-    if (strcmp(txt, "i16") == 0) return TYPE_I16_ARRAY;
-    if (strcmp(txt, "i64") == 0) return TYPE_I64_ARRAY;
-    if (strcmp(txt, "bool") == 0) return TYPE_BOOL_ARRAY;
-    return TYPE_ARRAY;
+    if (strcmp(txt, "num") == 0) {
+        error("Type 'num' has been removed");
+    }
+    return TYPE_ANY;
 }
 
 void match(MyloTokenType t) {
@@ -710,6 +730,16 @@ void compiler_reset() {
     inside_function = false;
 }
 
+static bool is_enum_type(const char *name) {
+    int len = (int)strlen(name);
+    for (int i = 0; i < enum_entry_count; i++) {
+        if (strncmp(enum_entries[i].name, name, len) == 0 && enum_entries[i].name[len] == '_') {
+            return true;
+        }
+    }
+    return false;
+}
+
 TypeInfo parse_type_spec() {
     TypeInfo info = {TYPE_ANY, false};
     if (curr.type == TK_TYPE_DEF) {
@@ -718,13 +748,28 @@ TypeInfo parse_type_spec() {
     } else {
         char tn[MAX_IDENTIFIER];
         parse_namespaced_id(tn);
+        if (strcmp(tn, "num") == 0) {
+            error("Type 'num' has been removed");
+        }
         int explicit_struct = find_struct(tn);
         if (explicit_struct == -1) {
              char m[MAX_IDENTIFIER * 2];
              get_mangled_name(m, tn);
              explicit_struct = find_struct(m);
         }
-        if(explicit_struct != -1) info.id = explicit_struct;
+        if (explicit_struct != -1) {
+            info.id = explicit_struct;
+        } else if (is_enum_type(tn)) {
+            info.id = TYPE_ENUM;
+        } else {
+            char m[MAX_IDENTIFIER * 2];
+            get_mangled_name(m, tn);
+            if (is_enum_type(m)) {
+                info.id = TYPE_ENUM;
+            } else {
+                error("Unknown type '%s'", tn);
+            }
+        }
     }
 
     if (curr.type == TK_LBRACKET) {
@@ -1288,10 +1333,20 @@ void expression() {
 
 int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
     if (is_loc) {
-        if (name) strcpy(locals[local_count].name, name);
+        if (name) {
+            for (int i = 0; i < local_count; i++) {
+                if (strcmp(locals[i].name, name) == 0 && locals[i].scope_depth == current_scope_depth) {
+                    error("Redefinition of '%s' in the same scope", name);
+                }
+            }
+            strcpy(locals[local_count].name, name);
+        } else {
+            locals[local_count].name[0] = '\0';
+        }
         locals[local_count].offset = local_count;
         locals[local_count].type_id = type_id;
         locals[local_count].is_array = is_array;
+        locals[local_count].scope_depth = current_scope_depth;
         if (debug_symbol_count < MAX_DEBUG_SYMBOLS) {
             if (name) strcpy(debug_symbols[debug_symbol_count].name, name);
             debug_symbols[debug_symbol_count].stack_offset = local_count;
@@ -1306,10 +1361,8 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
     get_mangled_name(m, name);
 
     for (int i = 0; i < global_count; i++) {
-        if (strcmp(globals[i].name, m) == 0) {
-            globals[i].type_id = type_id;
-            globals[i].is_array = is_array;
-            return i;
+        if (strcmp(globals[i].name, m) == 0 && globals[i].scope_depth == current_scope_depth) {
+            error("Redefinition of '%s' in the same scope", name);
         }
     }
 
@@ -1317,6 +1370,7 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
     globals[global_count].addr = global_count;
     globals[global_count].type_id = type_id;
     globals[global_count].is_array = is_array;
+    globals[global_count].scope_depth = current_scope_depth;
     return global_count++;
 }
 
@@ -1624,103 +1678,87 @@ static void parse_import() {
     }
 }
 
-static void parse_var_decl() {
-    match(TK_VAR);
-    char name[MAX_IDENTIFIER];
-    strcpy(name, curr.text);
-    match(TK_ID);
-    bool specific_region = false;
-    char region_var_name[MAX_IDENTIFIER];
+static inline bool is_packed_array_type(int type) {
+    return (type == TYPE_U8 || type == TYPE_U16 || type == TYPE_U32 || type == TYPE_U64 ||
+            type == TYPE_I8 || type == TYPE_I16 || type == TYPE_I32 || type == TYPE_I64 ||
+            type == TYPE_F16 || type == TYPE_F32 || type == TYPE_F64 ||
+            type == TYPE_BOOL || type == TYPE_BOOL_ARRAY || type == TYPE_BYTES);
+}
 
-    if (curr.type == TK_SCOPE) {
-        match(TK_SCOPE);
-        strcpy(region_var_name, name);
-        specific_region = true;
-        char member_name[MAX_IDENTIFIER];
-        strcpy(member_name, curr.text);
-        match(TK_ID);
-        sprintf(name, "%s_%s", region_var_name, member_name);
-
-        int reg_loc = find_local(region_var_name);
-        if (reg_loc != -1) {
-            emit(OP_LVAR);
-            emit(locals[reg_loc].offset);
-        } else {
-            int reg_glob = find_global(region_var_name);
-            if (reg_glob != -1) {
-                emit(OP_GET);
-                emit(globals[reg_glob].addr);
-            } else error("Undefined region");
-        }
-        emit(OP_SET_CTX);
-    }
-
-    TypeInfo type_info = {TYPE_ANY, false};
-    if (curr.type == TK_COLON) {
-        match(TK_COLON);
-        type_info = parse_type_spec();
-    }
-    match(TK_EQ_ASSIGN);
+static void parse_var_decl(char *name) {
+    match(TK_COLON);
+    TypeInfo type_info = parse_type_spec();
 
     bool handled = false;
 
-    if (type_info.is_array && type_info.id != TYPE_ANY && type_info.id < 0 && curr.type == TK_LBRACKET) {
-        match(TK_LBRACKET);
-        int count = 0;
-        if (curr.type != TK_RBRACKET) {
-            do {
-                expression();
-                count++;
-                if (curr.type == TK_COMMA) match(TK_COMMA);
-            } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
-        }
-        match(TK_RBRACKET);
-        emit(OP_MAKE_ARR);
-        emit(count);
-        emit(type_info.id);
-        handled = true;
-    }
-    else if (type_info.is_array && type_info.id >= 0 && curr.type == TK_LBRACKET) {
-        match(TK_LBRACKET);
-        int count = 0;
-        if (curr.type != TK_RBRACKET) {
-            do {
-                if (curr.type == TK_LBRACE) parse_struct_literal(type_info.id);
-                else expression();
-                count++;
-                if (curr.type == TK_COMMA) match(TK_COMMA);
-            } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
-        }
-        match(TK_RBRACKET);
-        emit(OP_ARR);
-        emit(count);
-        handled = true;
-    }
-    else if (type_info.id >= 0 && !type_info.is_array && curr.type == TK_LBRACE) {
-        parse_struct_literal(type_info.id);
-        handled = true;
-    }
-    else if (type_info.id == TYPE_ANY && curr.type == TK_LBRACE) {
-        char *safe_src = src;
-        Token safe_curr = curr;
-        int safe_line = line;
-        match(TK_LBRACE);
-        bool is_map = (curr.type == TK_STR || curr.type == TK_RBRACE);
-        src = safe_src;
-        curr = safe_curr;
-        line = safe_line;
-        if (is_map) parse_map_literal();
-        else error("Struct literal requires type");
-        handled = true;
-    }
+    if (curr.type == TK_EQ_ASSIGN) {
+        match(TK_EQ_ASSIGN);
 
-    if (!handled) {
-        expression();
-    }
+        if (type_info.is_array && is_packed_array_type(type_info.id) && curr.type == TK_LBRACKET) {
+            match(TK_LBRACKET);
+            int count = 0;
+            if (curr.type != TK_RBRACKET) {
+                do {
+                    expression();
+                    count++;
+                    if (curr.type == TK_COMMA) match(TK_COMMA);
+                } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
+            }
+            match(TK_RBRACKET);
+            emit(OP_MAKE_ARR);
+            emit(count);
+            emit(type_info.id);
+            handled = true;
+        }
+        else if (type_info.is_array && curr.type == TK_LBRACKET) {
+            match(TK_LBRACKET);
+            int count = 0;
+            if (curr.type != TK_RBRACKET) {
+                do {
+                    if (type_info.id >= 0) parse_struct_literal(type_info.id);
+                    else expression();
+                    count++;
+                    if (curr.type == TK_COMMA) match(TK_COMMA);
+                } while (curr.type != TK_RBRACKET && curr.type != TK_EOF);
+            }
+            match(TK_RBRACKET);
+            emit(OP_ARR);
+            emit(count);
+            handled = true;
+        }
+        else if (type_info.id >= 0 && !type_info.is_array && curr.type == TK_LBRACE) {
+            parse_struct_literal(type_info.id);
+            handled = true;
+        }
+        else if (type_info.id == TYPE_ANY && curr.type == TK_LBRACE) {
+            char *safe_src = src;
+            Token safe_curr = curr;
+            int safe_line = line;
+            match(TK_LBRACE);
+            bool is_map = (curr.type == TK_STR || curr.type == TK_RBRACE);
+            src = safe_src;
+            curr = safe_curr;
+            line = safe_line;
+            if (is_map) parse_map_literal();
+            else error("Struct literal requires type");
+            handled = true;
+        }
 
-    if (type_info.id != TYPE_ANY && !type_info.is_array) {
-        emit(OP_CAST);
-        emit(type_info.id);
+        if (!handled) {
+            expression();
+        }
+
+        if (type_info.id != TYPE_ANY && !type_info.is_array) {
+            emit(OP_CAST);
+            emit(type_info.id);
+        }
+    } else {
+        emit(OP_PSH_NUM);
+        emit(make_const(compiling_vm, 0.0));
+        if (type_info.id != TYPE_ANY && !type_info.is_array) {
+            emit(OP_CAST);
+            emit(type_info.id);
+        }
     }
 
     int var_idx = alloc_var(inside_function, name, type_info.id, type_info.is_array);
@@ -1728,19 +1766,36 @@ static void parse_var_decl() {
         emit(OP_SET);
         emit(globals[var_idx].addr);
     }
-
-    if (specific_region) {
-        emit(OP_PSH_NUM);
-        emit(make_const(compiling_vm, 0.0));
-        emit(OP_SET_CTX);
-    }
 }
 
 static void parse_id_statement(Token start_token, char *name) {
     if (curr.type == TK_EQ_ASSIGN) {
         match(TK_EQ_ASSIGN);
-        expression();
         int loc = find_local(name);
+        int glob = -1;
+        if (loc == -1) {
+            char m[MAX_IDENTIFIER * 2];
+            get_mangled_name(m, name);
+            if ((glob = find_global(m)) == -1) {
+                glob = find_global(name);
+            }
+        }
+        if (loc == -1 && glob == -1) {
+            error("Variable '%s' is not declared (what is '%s'?)", name, name);
+        }
+        int var_type = (loc != -1) ? locals[loc].type_id : globals[glob].type_id;
+        bool is_array = (loc != -1) ? locals[loc].is_array : globals[glob].is_array;
+
+        // Strict Type Check for literal assignment
+        if (var_type == TYPE_STR && curr.type == TK_NUM) {
+            error("Type mismatch: cannot assign number to string '%s'", name);
+        }
+        if (var_type != TYPE_STR && var_type != TYPE_ANY && curr.type == TK_STR) {
+            error("Type mismatch: cannot assign string to non-string '%s'", name);
+        }
+
+        expression();
+
         if (loc != -1) {
             if (locals[loc].type_id != TYPE_ANY && !locals[loc].is_array) {
                 emit(OP_CAST);
@@ -1749,13 +1804,6 @@ static void parse_id_statement(Token start_token, char *name) {
             emit(OP_SVAR);
             emit(locals[loc].offset);
         } else {
-            int glob = -1;
-            char m[MAX_IDENTIFIER * 2];
-            get_mangled_name(m, name);
-            if ((glob = find_global(m)) != -1) {
-            } else if ((glob = find_global(name)) != -1) {
-            }
-            if (glob == -1) error("Undefined var '%s'", name);
             if (globals[glob].type_id != TYPE_ANY && !globals[glob].is_array) {
                 emit(OP_CAST);
                 emit(globals[glob].type_id);
@@ -1854,7 +1902,7 @@ static void parse_id_statement(Token start_token, char *name) {
                     expression();
 
                     // Strong Typing: If the leaf field has a specific type, cast the expression result
-                    if (field_type != TYPE_ANY && field_type != TYPE_NUM) {
+                    if (field_type != TYPE_ANY) {
                         emit(OP_CAST);
                         emit(field_type);
                     }
@@ -1914,6 +1962,7 @@ static void parse_if() {
 
     // --- Track locals for the IF body ---
     int saved_local_count_if = local_count;
+    int saved_global_count_if = global_count;
     bool is_local_scope = inside_function;
 
     emit(OP_SCOPE_ENTER);
@@ -1925,6 +1974,8 @@ static void parse_if() {
         int vars_to_pop = local_count - saved_local_count_if;
         for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
         local_count = saved_local_count_if;
+    } else {
+        global_count = saved_global_count_if;
     }
 
     emit(OP_SCOPE_EXIT);
@@ -1953,6 +2004,7 @@ static void parse_if() {
         match(TK_LBRACE);
 
         int saved_local_count_elif = local_count;
+        int saved_global_count_elif = global_count;
         emit(OP_SCOPE_ENTER);
         current_scope_depth++;
 
@@ -1962,6 +2014,8 @@ static void parse_if() {
             int vars_to_pop = local_count - saved_local_count_elif;
             for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count_elif;
+        } else {
+            global_count = saved_global_count_elif;
         }
 
         emit(OP_SCOPE_EXIT);
@@ -1982,6 +2036,7 @@ static void parse_if() {
         match(TK_LBRACE);
 
         int saved_local_count_else = local_count;
+        int saved_global_count_else = global_count;
         emit(OP_SCOPE_ENTER);
         current_scope_depth++;
 
@@ -1991,6 +2046,8 @@ static void parse_if() {
             int vars_to_pop = local_count - saved_local_count_else;
             for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count_else;
+        } else {
+            global_count = saved_global_count_else;
         }
 
         emit(OP_SCOPE_EXIT);
@@ -2061,13 +2118,7 @@ void for_statement() {
 
     emit(OP_SCOPE_ENTER); current_scope_depth++; // Outer Loop Scope
 
-    if (curr.type == TK_VAR) {
-        match(TK_VAR);
-        strcpy(name1, curr.text);
-        match(TK_ID);
-        if (curr.type == TK_COLON) { match(TK_COLON); TypeInfo ti = parse_type_spec(); explicit_type = ti.id; }
-        is_iter = true;
-    } else if (curr.type == TK_ID) {
+    if (curr.type == TK_ID) {
         char *safe_src = src; Token safe_curr = curr; int safe_line = line;
         strcpy(name1, curr.text);
         match(TK_ID);
@@ -2078,6 +2129,7 @@ void for_statement() {
     }
 
     int saved_local_count = local_count;
+    int saved_global_count = global_count;
     bool is_local_scope = inside_function;
 
     if (is_iter) {
@@ -2091,7 +2143,7 @@ void for_statement() {
         int a = alloc_var(is_local_scope, arr_name, TYPE_ANY, true);
         if (!is_local_scope) { emit(OP_SET); emit(a); }
 
-        int i = alloc_var(is_local_scope, idx_name, TYPE_NUM, false);   emit(OP_PSH_NUM); emit(make_const(compiling_vm, 0.0));
+        int i = alloc_var(is_local_scope, idx_name, TYPE_I32, false);   emit(OP_PSH_NUM); emit(make_const(compiling_vm, 0.0));
         if (!is_local_scope) { emit(OP_SET); emit(i); }
 
         int loop = compiling_vm->code_size;
@@ -2108,6 +2160,7 @@ void for_statement() {
         match(TK_RPAREN); match(TK_LBRACE);
 
         int body_saved_local_count = local_count;
+        int body_saved_global_count = global_count;
         bool body_is_local_scope = inside_function;
 
         // Capture State right before entering the body!
@@ -2121,6 +2174,8 @@ void for_statement() {
             int vars_to_pop = local_count - body_saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = body_saved_local_count;
+        } else {
+            global_count = body_saved_global_count;
         }
 
         emit(OP_SCOPE_EXIT); current_scope_depth--; // Inner Body Scope
@@ -2142,6 +2197,8 @@ void for_statement() {
             int vars_to_pop = local_count - saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count;
+        } else {
+            global_count = saved_global_count;
         }
 
         emit(OP_SCOPE_EXIT); current_scope_depth--; // Outer Scope
@@ -2158,6 +2215,7 @@ void for_statement() {
         int exit = compiling_vm->code_size; emit(0); match(TK_LBRACE);
 
         int body_saved_local_count = local_count;
+        int body_saved_global_count = global_count;
         bool body_is_local_scope = inside_function;
 
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
@@ -2166,6 +2224,8 @@ void for_statement() {
             int vars_to_pop = local_count - body_saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = body_saved_local_count;
+        } else {
+            global_count = body_saved_global_count;
         }
 
         int brace_line = curr.line; match(TK_RBRACE);
@@ -2186,6 +2246,8 @@ void for_statement() {
             int vars_to_pop = local_count - saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count;
+        } else {
+            global_count = saved_global_count;
         }
 
         emit(OP_SCOPE_EXIT); current_scope_depth--; // Outer Scope
@@ -2203,23 +2265,13 @@ void struct_decl() {
     int idx = struct_count++;
     strcpy(struct_defs[idx].name, m);
     struct_defs[idx].field_count = 0;
-    while (curr.type == TK_VAR || curr.type == TK_FN) {
-        if (curr.type == TK_VAR) {
-            match(TK_VAR);
+    while (curr.type == TK_ID || curr.type == TK_FN) {
+        if (curr.type == TK_ID) {
             strcpy(struct_defs[idx].fields[struct_defs[idx].field_count], curr.text);
-
-            // Default to NUM (double) if no type is provided, standard for Mylo structs
-            struct_defs[idx].field_types[struct_defs[idx].field_count] = TYPE_NUM;
-
             match(TK_ID);
-
-            // Check for Type Annotation : i16
-            if (curr.type == TK_COLON) {
-                match(TK_COLON);
-                TypeInfo ti = parse_type_spec();
-                struct_defs[idx].field_types[struct_defs[idx].field_count] = ti.id;
-            }
-
+            match(TK_COLON);
+            TypeInfo ti = parse_type_spec();
+            struct_defs[idx].field_types[struct_defs[idx].field_count] = ti.id;
             struct_defs[idx].field_count++;
         } else if (curr.type == TK_FN) {
             match(TK_FN);
@@ -2345,7 +2397,7 @@ void parse_struct_literal(int struct_idx) {
         int field_type = struct_defs[struct_idx].field_types[offset];
 
         // If the field has a specific type (not 'any' and not generic 'num'), enforce it
-        if (field_type != TYPE_ANY && field_type != TYPE_NUM) {
+        if (field_type != TYPE_ANY) {
             emit(OP_CAST);
             emit(field_type);
         }
@@ -2439,17 +2491,55 @@ void statement() {
         match(TK_STR);
         match(TK_RPAREN);
         if (search_path_count < MAX_SEARCH_PATHS) strcpy(search_paths[search_path_count++], path);
+    } else if (curr.type == TK_LBRACE) {
+        match(TK_LBRACE);
+        bool is_arena = false;
+        if (curr.type == TK_LBRACKET) {
+            match(TK_LBRACKET);
+            char arena_name[MAX_IDENTIFIER];
+            strcpy(arena_name, curr.text);
+            match(TK_ID);
+            match(TK_RBRACKET);
+            is_arena = true;
+            emit(OP_NEW_ARENA);
+        }
+        int saved_local_count = local_count;
+        int saved_global_count = global_count;
+        bool is_local_scope = inside_function;
+
+        emit(OP_SCOPE_ENTER);
+        current_scope_depth++;
+
+        while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        if (is_local_scope) {
+            int vars_to_pop = local_count - saved_local_count;
+            for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
+            local_count = saved_local_count;
+        } else {
+            global_count = saved_global_count;
+        }
+
+        emit(OP_SCOPE_EXIT);
+        current_scope_depth--;
+        match(TK_RBRACE);
+
+        if (is_arena) {
+            emit(OP_DEL_ARENA);
+        }
     } else if (curr.type == TK_ID && strcmp(curr.text, "C") == 0) {
         parse_c_block_stmt();
-    } else if (curr.type == TK_VAR) {
-        parse_var_decl();
     } else if (curr.type == TK_FOR) {
         for_statement();
     } else if (curr.type == TK_ID) {
         Token start_token = curr;
         char name[MAX_IDENTIFIER];
         parse_namespaced_id(name);
-        parse_id_statement(start_token, name);
+        if (curr.type == TK_COLON) {
+            parse_var_decl(name);
+        } else {
+            parse_id_statement(start_token, name);
+        }
     } else if (curr.type == TK_STRUCT) {
         struct_decl();
     } else if (curr.type == TK_IF) {
@@ -2458,6 +2548,7 @@ void statement() {
         match(TK_FOREVER);
         match(TK_LBRACE);
         int saved_local_count = local_count;
+        int saved_global_count = global_count;
         bool is_local_scope = inside_function;
 
         int loop_start = compiling_vm->code_size;
@@ -2472,6 +2563,8 @@ void statement() {
             int vars_to_pop = local_count - saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
             local_count = saved_local_count;
+        } else {
+            global_count = saved_global_count;
         }
 
         emit(OP_SCOPE_EXIT); current_scope_depth--; // Body Scope
@@ -2555,6 +2648,7 @@ void parse_function_body(char* registered_name, char* mangled_name, int implicit
     }
 
     while (curr.type != TK_RBRACE) statement();
+    emit(OP_SCOPE_EXIT); current_scope_depth--;
     match(TK_RBRACE);
     emit(OP_PSH_NUM);
     int z = make_const(compiling_vm, 0.0);
@@ -2895,7 +2989,7 @@ void compile_repl(VM* vm, char *source, int *out_start_ip) {
 
     if (curr.type == TK_FN) function();
     else if (curr.type == TK_STRUCT) struct_decl();
-    else if (curr.type == TK_VAR || curr.type == TK_IF || curr.type == TK_FOR ||
+    else if (curr.type == TK_LBRACE || curr.type == TK_IF || curr.type == TK_FOR ||
              curr.type == TK_FOREVER || curr.type == TK_PRINT || curr.type == TK_IMPORT ||
              curr.type == TK_RET || curr.type == TK_BREAK || curr.type == TK_CONTINUE ||
              curr.type == TK_ENUM || curr.type == TK_REGION || curr.type == TK_CLEAR ||

@@ -74,16 +74,15 @@ typedef struct {
     int addr;
 } VMFunction;
 
-// --- GC Heap Struct ---
+// --- Memory Arena Struct ---
 typedef struct {
-    double** memory; // Array of double arrays (the data)
-    int** types;     // Array of int arrays (the type info for data)
-    int* sizes;      // Size of each allocation
-    char* marked;    // Mark bits for GC
-    int capacity;    // Max number of objects
-    int count;       // Current allocated objects
-    int next_free;   // Hint for next free index
-} GCHeap;
+    double* memory;
+    int* types;
+    int head;
+    int capacity;
+    bool active;
+    int generation;
+} MemoryArena;
 
 // --- Debug Structures ---
 typedef struct {
@@ -119,7 +118,10 @@ typedef struct VM {
     double* stack;
     double* globals;
     double* constants;
-    GCHeap heap;
+    MemoryArena arenas[MAX_ARENAS];
+    int current_arena;
+    int arena_stack[MAX_ARENAS];
+    int arena_sp;
     int* bytecode;
     int* lines;
     int* stack_types;
@@ -193,8 +195,9 @@ double vm_evacuate_object(VM* vm, double ptr_val, int target_head);
 void enter_debugger(VM* vm);
 void print_raw(VM* vm, const char* str);
 
-// Expose GC allocator
-void gc_collect(VM* vm);
+// Expose Arena allocator
+void init_arena(VM* vm, int id);
+void free_arena(VM* vm, int id);
 // Pointer storage and retrieval
 #define MYLO_STORE(val, type_name) vm_store_copy(vm, &(val), sizeof(val), type_name)
 #define MYLO_RETRIEVE(id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)
