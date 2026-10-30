@@ -339,26 +339,30 @@ fn main() {
     print("")
     print(f"Rendered {W}x{H} scene in {ms} ms")
     
-    // Export binary PPM image file (P6 format, direct bytes, zero string pool overhead)
-    ppm_w: i32 = W/2
-    ppm_h: i32 = H/2
-    hdr_str: string = f"P6\n{ppm_w} {ppm_h}\n255\n"
-    hdr_len: i32 = len(hdr_str)
-    
-    total_bytes: i32 = hdr_len + ppm_w * ppm_h * 3
-    img: i32[] = list(total_bytes)
-    for (hi in 0 ... (hdr_len - 1)) {
-        img[hi] = ord(hdr_str[hi])
+    // Export text PPM image file (P3 format streamed directly to disk)
+    ppm_w: i32 = W
+    ppm_h: i32 = H
+
+    fd: i32 = file_open("raytrace.ppm", "w")
+    if (fd < 0) {
+        print("Error: Could not open raytrace.ppm for writing")
+        ret
     }
-    
-    out_idx: i32 = hdr_len
+
+    header: string = f"P3\n{ppm_w} {ppm_h}\n255\n"
+    file_write(fd, header)
+
     f_w: f64 = ppm_w * 1.0
     f_h: f64 = ppm_h * 1.0
 
-    print(f"Tracing {ppm_w}x{ppm_h} image for PPM export...")
+    print(f"Streaming {ppm_w}x{ppm_h} text PPM to file...")
     trace_t0: f64 = clock()
 
+    // Preallocate a single reusable row buffer for the entire render
+    row: i32[] = list(ppm_w * 3)
+
     for (py_idx in 0 ... (ppm_h - 1)) {
+        col_idx: i32 = 0
         for (px_idx in 0 ... (ppm_w - 1)) {
             norm_px: f64 = ((px_idx + 0.5) / f_w) * 2.0 - 1.0
             norm_py: f64 = 1.0 - ((py_idx + 0.5) / f_h) * 2.0
@@ -376,18 +380,19 @@ fn main() {
             ig: i32 = floor(clamp(pix.y, 0.0, 1.0) * 255.0)
             ib: i32 = floor(clamp(pix.z, 0.0, 1.0) * 255.0)
 
-            img[out_idx] = ir
-            img[out_idx + 1] = ig
-            img[out_idx + 2] = ib
-            out_idx = out_idx + 3
+            row[col_idx] = ir
+            row[col_idx + 1] = ig
+            row[col_idx + 2] = ib
+            col_idx = col_idx + 3
         }
+        file_write_row(fd, row, ppm_w)
     }
+
+    file_close(fd)
     
     trace_t1: f64 = clock()
     trace_ms: f64 = (trace_t1 - trace_t0) * 1000.0
-    print(f"PPM tracing completed in {trace_ms} ms")
-
-    write_bytes("raytrace.ppm", img)
+    print(f"PPM streaming completed in {trace_ms} ms")
     print("Wrote raytrace.ppm successfully!")
 }
 

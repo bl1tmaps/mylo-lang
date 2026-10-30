@@ -57,11 +57,17 @@ The Mylo Standard Library provides essential built-in functions for file I/O, ma
   * [Time & Timing](#time--timing)
     + [`clock() -> f64`](#clock---f64)
     + [`sleep(ms: i32) -> void`](#sleepms-i32---void)
-  * [File I/O (Text & Binary)](#file-io-text--binary)
+  * [File I/O (Text, Binary & Streaming)](#file-io-text-binary--streaming)
     + [`read_lines(path: string) -> string[]`](#read_linespath-string---string)
     + [`write_file(path: string, content: string, mode: string) -> i32`](#write_filepath-string-content-string-mode-string---i32)
     + [`read_bytes(path: string, stride: i32) -> i32[]`](#read_bytespath-string-stride-i32---i32)
     + [`write_bytes(path: string, data: i32[]) -> i32`](#write_bytespath-string-data-i32---i32)
+    + [`file_open(path: string, mode: string) -> i32`](#file_openpath-string-mode-string---i32)
+    + [`file_write(fd: i32, content: any) -> void`](#file_writefd-i32-content-any---void)
+    + [`file_write_pixel(fd: i32, r: i32, g: i32, b: i32) -> void`](#file_write_pixelfd-i32-r-i32-g-i32-b-i32---void)
+    + [`file_write_row(fd: i32, row: i32[], count: i32) -> void`](#file_write_rowfd-i32-row-i32-count-i32---void)
+    + [`file_flush(fd: i32) -> void`](#file_flushfd-i32---void)
+    + [`file_close(fd: i32) -> void`](#file_closefd-i32---void)
     + [`list_dir(path: string, filter: string) -> string[]`](#list_dirpath-string-filter-string---string)
   * [OS System & Process Management](#os-system--process-management)
     + [`system(command: string) -> string[]`](#systemcommand-string---string)
@@ -618,7 +624,7 @@ sleep(50) // Sleep 50ms
 
 ---
 
-## File I/O (Text & Binary)
+## File I/O (Text, Binary & Streaming)
 
 <a name="read_linespath-string---string"></a>
 ### `read_lines(path: string) -> string[]`
@@ -664,6 +670,82 @@ Reads a binary file into an array of integers.
 ### `write_bytes(path: string, data: i32[]) -> i32`
 
 Writes an array of integer values as raw bytes (each value clamped to 0–255) to the specified file.
+
+---
+
+<a name="file_openpath-string-mode-string---i32"></a>
+### `file_open(path: string, mode: string) -> i32`
+
+Opens a file stream. Supports `"w"` (overwrite), `"a"` (append), `"r"` (read), etc.
+
+**Returns:**
+* File descriptor handle (non-negative integer) on success, or `-1` on error.
+
+**Example:**
+```javascript
+fd: i32 = file_open("output.ppm", "w")
+```
+
+---
+
+<a name="file_writefd-i32-content-any---void"></a>
+### `file_write(fd: i32, content: any) -> void`
+
+Streams content directly to an open file handle without intermediate buffer allocation:
+* **String**: Writes the string directly (`fputs`).
+* **Number**: Writes formatted integer or floating-point number without string pool interning.
+
+**Example:**
+```javascript
+file_write(fd, "P3\n")
+file_write(fd, 100)
+file_write(fd, "\n")
+```
+
+---
+
+<a name="file_write_pixelfd-i32-r-i32-g-i32-b-i32---void"></a>
+### `file_write_pixel(fd: i32, r: i32, g: i32, b: i32) -> void`
+
+Streams an RGB pixel triplet (`"R G B "`) directly to an open file stream. Avoids string pool allocations in tight image rendering loops.
+
+**Example:**
+```javascript
+file_write_pixel(fd, 255, 128, 0)
+```
+
+---
+
+<a name="file_write_rowfd-i32-row-i32-count-i32---void"></a>
+### `file_write_row(fd: i32, row: i32[], count: i32) -> void`
+
+Streams an entire row of `count` RGB pixels (where `row` contains `count * 3` integer values: `[r0, g0, b0, r1, g1, b1, ...]`) directly to an open file stream in ASCII text format, followed by a newline. Avoids multiple native function calls and buffer allocations.
+
+**Example:**
+```javascript
+row: i32[] = list(1920 * 3)
+// fill row...
+file_write_row(fd, row, 1920)
+```
+
+---
+
+<a name="file_flushfd-i32---void"></a>
+### `file_flush(fd: i32) -> void`
+
+Flushes the file stream's internal buffer to disk.
+
+---
+
+<a name="file_closefd-i32---void"></a>
+### `file_close(fd: i32) -> void`
+
+Flushes and closes an open file handle.
+
+**Example:**
+```javascript
+file_close(fd)
+```
 
 ---
 

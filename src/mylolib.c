@@ -2588,6 +2588,151 @@ void std_popcount(VM *vm) {
   vm_push(vm, (double)count, T_NUM);
 }
 
+// --- File Streaming Support ---
+#define MAX_OPEN_FILES 64
+static FILE *open_file_table[MAX_OPEN_FILES];
+static bool file_table_init = false;
+
+static void init_file_table(void) {
+  if (!file_table_init) {
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+      open_file_table[i] = NULL;
+    }
+    file_table_init = true;
+  }
+}
+
+void std_file_open(VM *vm) {
+  init_file_table();
+  double mode_id = vm_pop(vm);
+  double path_id = vm_pop(vm);
+
+  const char *mode = get_str(vm, mode_id);
+  const char *path = get_str(vm, path_id);
+
+  int slot = -1;
+  for (int i = 0; i < MAX_OPEN_FILES; i++) {
+    if (!open_file_table[i]) {
+      slot = i;
+      break;
+    }
+  }
+
+  if (slot == -1) {
+    vm_push(vm, -1.0, T_NUM);
+    return;
+  }
+
+  FILE *f = fopen(path, mode);
+  if (!f) {
+    vm_push(vm, -1.0, T_NUM);
+    return;
+  }
+
+  open_file_table[slot] = f;
+  vm_push(vm, (double)slot, T_NUM);
+}
+
+void std_file_write(VM *vm) {
+  int content_type = vm->stack_types[vm->sp];
+  double content = vm_pop(vm);
+  double fd_val = vm_pop(vm);
+
+  int fd = (int)fd_val;
+  if (fd < 0 || fd >= MAX_OPEN_FILES || !open_file_table[fd]) {
+    printf("Runtime Error: invalid file descriptor %d in file_write\n", fd);
+    exit(1);
+  }
+
+  FILE *f = open_file_table[fd];
+  if (content_type == T_STR) {
+    const char *s = get_str(vm, content);
+    fputs(s, f);
+  } else if (content_type == T_NUM) {
+    if ((double)(int64_t)content == content) {
+      fprintf(f, "%lld", (long long)content);
+    } else {
+      fprintf(f, "%g", content);
+    }
+  } else {
+    fprintf(f, "%g", content);
+  }
+  vm_push(vm, 0.0, T_NUM);
+}
+
+void std_file_write_pixel(VM *vm) {
+  double b_val = vm_pop(vm);
+  double g_val = vm_pop(vm);
+  double r_val = vm_pop(vm);
+  double fd_val = vm_pop(vm);
+
+  int fd = (int)fd_val;
+  if (fd < 0 || fd >= MAX_OPEN_FILES || !open_file_table[fd]) {
+    printf("Runtime Error: invalid file descriptor %d in file_write_pixel\n", fd);
+    exit(1);
+  }
+
+  fprintf(open_file_table[fd], "%d %d %d ", (int)r_val, (int)g_val, (int)b_val);
+  vm_push(vm, 0.0, T_NUM);
+}
+
+void std_file_write_row(VM *vm) {
+  double count_val = vm_pop(vm);
+  double arr_ref = vm_pop(vm);
+  double fd_val = vm_pop(vm);
+
+  int fd = (int)fd_val;
+  if (fd < 0 || fd >= MAX_OPEN_FILES || !open_file_table[fd]) {
+    printf("Runtime Error: invalid file descriptor %d in file_write_row\n", fd);
+    exit(1);
+  }
+
+  double *base = vm_resolve_ptr(vm, arr_ref);
+  if (!base) {
+    printf("Runtime Error: file_write_row expects array\n");
+    exit(1);
+  }
+
+  int count = (int)count_val;
+  FILE *f = open_file_table[fd];
+  char buf[65536];
+  int pos = 0;
+  for (int i = 0; i < count; i++) {
+    int r = (int)base[HEAP_HEADER_ARRAY + i * 3 + 0] & 0xFF;
+    int g = (int)base[HEAP_HEADER_ARRAY + i * 3 + 1] & 0xFF;
+    int b = (int)base[HEAP_HEADER_ARRAY + i * 3 + 2] & 0xFF;
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "%d %d %d ", r, g, b);
+    if (pos >= (int)sizeof(buf) - 64) {
+      fwrite(buf, 1, pos, f);
+      pos = 0;
+    }
+  }
+  if (pos > 0) {
+    fwrite(buf, 1, pos, f);
+  }
+  fputc('\n', f);
+  vm_push(vm, 0.0, T_NUM);
+}
+
+void std_file_flush(VM *vm) {
+  double fd_val = vm_pop(vm);
+  int fd = (int)fd_val;
+  if (fd >= 0 && fd < MAX_OPEN_FILES && open_file_table[fd]) {
+    fflush(open_file_table[fd]);
+  }
+  vm_push(vm, 0.0, T_NUM);
+}
+
+void std_file_close(VM *vm) {
+  double fd_val = vm_pop(vm);
+  int fd = (int)fd_val;
+  if (fd >= 0 && fd < MAX_OPEN_FILES && open_file_table[fd]) {
+    fclose(open_file_table[fd]);
+    open_file_table[fd] = NULL;
+  }
+  vm_push(vm, 0.0, T_NUM);
+}
+
 const StdLibDef std_library[] = {
     {"type", std_type, "str", 1, {"any"}},
     {"len", std_len, "num", 1, {"any"}},
@@ -2666,4 +2811,10 @@ const StdLibDef std_library[] = {
     {"bit_shl", std_bit_shl, "num", 2, {"num", "num"}},
     {"bit_shr", std_bit_shr, "num", 2, {"num", "num"}},
     {"popcount", std_popcount, "num", 1, {"num"}},
+    {"file_open", std_file_open, "num", 2, {"str", "str"}},
+    {"file_write", std_file_write, "void", 2, {"num", "any"}},
+    {"file_write_pixel", std_file_write_pixel, "void", 4, {"num", "num", "num", "num"}},
+    {"file_write_row", std_file_write_row, "void", 3, {"num", "arr", "num"}},
+    {"file_flush", std_file_flush, "void", 1, {"num"}},
+    {"file_close", std_file_close, "void", 1, {"num"}},
     {NULL, NULL, NULL, 0, {NULL}}};

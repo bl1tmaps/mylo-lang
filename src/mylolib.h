@@ -86,6 +86,14 @@ void std_bit_shl(VM *vm);
 void std_bit_shr(VM *vm);
 void std_popcount(VM *vm);
 
+// File Streaming
+void std_file_open(VM *vm);
+void std_file_write(VM *vm);
+void std_file_write_pixel(VM *vm);
+void std_file_write_row(VM *vm);
+void std_file_flush(VM *vm);
+void std_file_close(VM *vm);
+
 // Registry Declaration (Extern)
 // We do NOT define it here, only say it exists.
 extern const StdLibDef std_library[];
