@@ -1,0 +1,375 @@
+// A small ray tracer: spheres on a checkered floor, light, shadows, and reflections.
+// Renders an ASCII preview directly in your terminal, and writes 'raytrace.ppm'.
+//
+// Run:
+//   ./build/mylo examples/raytrace.mylo
+
+struct Vec3 {
+    x: f64
+    y: f64
+    z: f64
+}
+
+struct Sphere {
+    cx: f64
+    cy: f64
+    cz: f64
+    radius: f64
+    r: f64
+    g: f64
+    b: f64
+    shine: f64
+}
+
+struct Hit {
+    hit: i32
+    t: f64
+    px: f64
+    py: f64
+    pz: f64
+    nx: f64
+    ny: f64
+    nz: f64
+    cr: f64
+    cg: f64
+    cb: f64
+    shine: f64
+}
+
+fn v_add(a: Vec3, b: Vec3) {
+    ret { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
+}
+
+fn v_sub(a: Vec3, b: Vec3) {
+    ret { x = a.x - b.x, y = a.y - b.y, z = a.z - b.z }
+}
+
+fn v_scale(v: Vec3, s: f64) {
+    ret { x = v.x * s, y = v.y * s, z = v.z * s }
+}
+
+fn v_dot(a: Vec3, b: Vec3) {
+    ret a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn v_norm(v: Vec3) {
+    l: f64 = sqrt(v_dot(v, v))
+    if (l == 0.0) {
+        ret { x = 0.0, y = 0.0, z = 0.0 }
+    }
+    ret { x = v.x / l, y = v.y / l, z = v.z / l }
+}
+
+// Scene setup
+LIGHT_X: f64 = 5.0
+LIGHT_Y: f64 = 8.0
+LIGHT_Z: f64 = -3.0
+
+// Intersect ray with all objects in scene
+fn trace(ox: f64, oy: f64, oz: f64, dx: f64, dy: f64, dz: f64) {
+    best_t: f64 = 1000000.0
+    found: i32 = 0
+    
+    hit_px: f64 = 0.0
+    hit_py: f64 = 0.0
+    hit_pz: f64 = 0.0
+    hit_nx: f64 = 0.0
+    hit_ny: f64 = 0.0
+    hit_nz: f64 = 0.0
+    hit_cr: f64 = 0.0
+    hit_cg: f64 = 0.0
+    hit_cb: f64 = 0.0
+    hit_shine: f64 = 0.0
+
+    // Sphere 1: Red center sphere
+    s1_cx: f64 = 0.0
+    s1_cy: f64 = 0.0
+    s1_cz: f64 = 4.0
+    s1_rad: f64 = 1.0
+
+    oc_x: f64 = ox - s1_cx
+    oc_y: f64 = oy - s1_cy
+    oc_z: f64 = oz - s1_cz
+    b_val: f64 = oc_x * dx + oc_y * dy + oc_z * dz
+    c_val: f64 = (oc_x * oc_x + oc_y * oc_y + oc_z * oc_z) - s1_rad * s1_rad
+    disc: f64 = b_val * b_val - c_val
+    if (disc >= 0.0) {
+        t: f64 = 0.0 - b_val - sqrt(disc)
+        if (t > 0.001 && t < best_t) {
+            best_t = t
+            found = 1
+            hit_px = ox + dx * t
+            hit_py = oy + dy * t
+            hit_pz = oz + dz * t
+            hit_nx = (hit_px - s1_cx) / s1_rad
+            hit_ny = (hit_py - s1_cy) / s1_rad
+            hit_nz = (hit_pz - s1_cz) / s1_rad
+            hit_cr = 0.9
+            hit_cg = 0.2
+            hit_cb = 0.2
+            hit_shine = 0.4
+        }
+    }
+
+    // Sphere 2: Green left sphere
+    s2_cx: f64 = -2.2
+    s2_cy: f64 = -0.3
+    s2_cz: f64 = 5.0
+    s2_rad: f64 = 0.7
+
+    oc_x = ox - s2_cx
+    oc_y = oy - s2_cy
+    oc_z = oz - s2_cz
+    b_val = oc_x * dx + oc_y * dy + oc_z * dz
+    c_val = (oc_x * oc_x + oc_y * oc_y + oc_z * oc_z) - s2_rad * s2_rad
+    disc = b_val * b_val - c_val
+    if (disc >= 0.0) {
+        t: f64 = 0.0 - b_val - sqrt(disc)
+        if (t > 0.001 && t < best_t) {
+            best_t = t
+            found = 1
+            hit_px = ox + dx * t
+            hit_py = oy + dy * t
+            hit_pz = oz + dz * t
+            hit_nx = (hit_px - s2_cx) / s2_rad
+            hit_ny = (hit_py - s2_cy) / s2_rad
+            hit_nz = (hit_pz - s2_cz) / s2_rad
+            hit_cr = 0.2
+            hit_cg = 0.8
+            hit_cb = 0.3
+            hit_shine = 0.1
+        }
+    }
+
+    // Sphere 3: Yellow reflective right sphere
+    s3_cx: f64 = 2.0
+    s3_cy: f64 = 0.2
+    s3_cz: f64 = 6.0
+    s3_rad: f64 = 1.2
+
+    oc_x = ox - s3_cx
+    oc_y = oy - s3_cy
+    oc_z = oz - s3_cz
+    b_val = oc_x * dx + oc_y * dy + oc_z * dz
+    c_val = (oc_x * oc_x + oc_y * oc_y + oc_z * oc_z) - s3_rad * s3_rad
+    disc = b_val * b_val - c_val
+    if (disc >= 0.0) {
+        t: f64 = 0.0 - b_val - sqrt(disc)
+        if (t > 0.001 && t < best_t) {
+            best_t = t
+            found = 1
+            hit_px = ox + dx * t
+            hit_py = oy + dy * t
+            hit_pz = oz + dz * t
+            hit_nx = (hit_px - s3_cx) / s3_rad
+            hit_ny = (hit_py - s3_cy) / s3_rad
+            hit_nz = (hit_pz - s3_cz) / s3_rad
+            hit_cr = 0.9
+            hit_cg = 0.85
+            hit_cb = 0.3
+            hit_shine = 0.7
+        }
+    }
+
+    // Sphere 4: Small blue front sphere
+    s4_cx: f64 = 0.6
+    s4_cy: f64 = -0.7
+    s4_cz: f64 = 2.6
+    s4_rad: f64 = 0.3
+
+    oc_x = ox - s4_cx
+    oc_y = oy - s4_cy
+    oc_z = oz - s4_cz
+    b_val = oc_x * dx + oc_y * dy + oc_z * dz
+    c_val = (oc_x * oc_x + oc_y * oc_y + oc_z * oc_z) - s4_rad * s4_rad
+    disc = b_val * b_val - c_val
+    if (disc >= 0.0) {
+        t: f64 = 0.0 - b_val - sqrt(disc)
+        if (t > 0.001 && t < best_t) {
+            best_t = t
+            found = 1
+            hit_px = ox + dx * t
+            hit_py = oy + dy * t
+            hit_pz = oz + dz * t
+            hit_nx = (hit_px - s4_cx) / s4_rad
+            hit_ny = (hit_py - s4_cy) / s4_rad
+            hit_nz = (hit_pz - s4_cz) / s4_rad
+            hit_cr = 0.3
+            hit_cg = 0.4
+            hit_cb = 0.95
+            hit_shine = 0.0
+        }
+    }
+
+    // The floor: plane y = -1.0, checkered pattern
+    if (dy < 0.0) {
+        t: f64 = (0.0 - 1.0 - oy) / dy
+        if (t > 0.001 && t < best_t) {
+            best_t = t
+            found = 1
+            hit_px = ox + dx * t
+            hit_py = oy + dy * t
+            hit_pz = oz + dz * t
+            hit_nx = 0.0
+            hit_ny = 1.0
+            hit_nz = 0.0
+            hit_shine = 0.15
+
+            chk_x: i32 = floor(hit_px)
+            chk_z: i32 = floor(hit_pz)
+            if ((chk_x + chk_z) % 2 == 0) {
+                hit_cr = 0.9
+                hit_cg = 0.9
+                hit_cb = 0.9
+            } else {
+                hit_cr = 0.2
+                hit_cg = 0.25
+                hit_cb = 0.3
+            }
+        }
+    }
+
+    ret {
+        hit = found
+        t = best_t
+        px = hit_px
+        py = hit_py
+        pz = hit_pz
+        nx = hit_nx
+        ny = hit_ny
+        nz = hit_nz
+        cr = hit_cr
+        cg = hit_cg
+        cb = hit_cb
+        shine = hit_shine
+    }
+}
+
+// Shade a ray
+fn shade(ox: f64, oy: f64, oz: f64, dx: f64, dy: f64, dz: f64, depth: i32) {
+    h: Hit = trace(ox, oy, oz, dx, dy, dz)
+    if (h.hit == 0) {
+        // Sky color
+        ret { x = 0.55, y = 0.7, z = 0.95 }
+    }
+
+    // Light direction
+    lx: f64 = LIGHT_X - h.px
+    ly: f64 = LIGHT_Y - h.py
+    lz: f64 = LIGHT_Z - h.pz
+    ll: f64 = sqrt(lx * lx + ly * ly + lz * lz)
+    lx = lx / ll
+    ly = ly / ll
+    lz = lz / ll
+
+    // Diffuse lighting
+    diff: f64 = h.nx * lx + h.ny * ly + h.nz * lz
+    if (diff < 0.0) {
+        diff = 0.0
+    }
+
+    // Shadow test
+    sh: Hit = trace(h.px, h.py, h.pz, lx, ly, lz)
+    if (sh.hit == 1) {
+        diff = diff * 0.2
+    }
+
+    intensity: f64 = 0.15 + 0.85 * diff
+    col_r: f64 = h.cr * intensity
+    col_g: f64 = h.cg * intensity
+    col_b: f64 = h.cb * intensity
+
+    // Mirror reflection
+    if (h.shine > 0.0 && depth > 0) {
+        dot_dn: f64 = dx * h.nx + dy * h.ny + dz * h.nz
+        rx: f64 = dx - 2.0 * dot_dn * h.nx
+        ry: f64 = dy - 2.0 * dot_dn * h.ny
+        rz: f64 = dz - 2.0 * dot_dn * h.nz
+
+        refl: Vec3 = shade(h.px, h.py, h.pz, rx, ry, rz, depth - 1)
+        col_r = col_r + (refl.x - col_r) * h.shine
+        col_g = col_g + (refl.y - col_g) * h.shine
+        col_b = col_b + (refl.z - col_b) * h.shine
+    }
+
+    ret { x = col_r, y = col_g, z = col_b }
+}
+
+fn main() {
+    print("=== Mylo Ray Tracer ===")
+    
+    W: i32 = 80
+    H: i32 = 30
+
+    ramp: string = " .:-=+*#%@"
+    
+    t0: f64 = clock()
+
+    eye_x: f64 = 0.0
+    eye_y: f64 = 0.5
+    eye_z: f64 = 0.0
+
+    // Render ASCII preview in terminal
+    for (y in 0 ... 29) {
+        line: string = ""
+        for (x in 0 ... 79) {
+            px: f64 = ((x + 0.5) / 80.0) * 2.0 - 1.0
+            py: f64 = 1.0 - ((y + 0.5) / 30.0) * 2.0
+
+            dir_x: f64 = px * 1.3
+            dir_y: f64 = py * 0.8
+            dir_z: f64 = 1.0
+            dl: f64 = sqrt(dir_x * dir_x + dir_y * dir_y + dir_z * dir_z)
+            dir_x = dir_x / dl
+            dir_y = dir_y / dl
+            dir_z = dir_z / dl
+
+            c: Vec3 = shade(eye_x, eye_y, eye_z, dir_x, dir_y, dir_z, 2)
+            
+            // Calculate luminance
+            lum: f64 = c.x * 0.3 + c.y * 0.59 + c.z * 0.11
+            idx: i32 = floor(clamp(lum * 9.0, 0.0, 9.0))
+            line = line + ramp[idx]
+        }
+        print(line)
+    }
+
+    t1: f64 = clock()
+    ms: f64 = (t1 - t0) * 1000.0
+    print("")
+    print(f"Rendered {W}x{H} scene in {ms} ms")
+    
+    // Export PPM image file (writing row by row to conserve string memory)
+    ppm_w: i32 = 80
+    ppm_h: i32 = 50
+    header: string = f"P3\n{ppm_w} {ppm_h}\n255\n"
+    write_file("raytrace.ppm", header, "w")
+    
+    for (py_idx in 0 ... (ppm_h - 1)) {
+        row_str: string = ""
+        for (px_idx in 0 ... (ppm_w - 1)) {
+            norm_px: f64 = ((px_idx + 0.5) / 80.0) * 2.0 - 1.0
+            norm_py: f64 = 1.0 - ((py_idx + 0.5) / 50.0) * 2.0
+            
+            dx: f64 = norm_px * 1.3
+            dy: f64 = norm_py * 0.8
+            dz: f64 = 1.0
+            dl: f64 = sqrt(dx * dx + dy * dy + dz * dz)
+            dx = dx / dl
+            dy = dy / dl
+            dz = dz / dl
+
+            pix: Vec3 = shade(eye_x, eye_y, eye_z, dx, dy, dz, 2)
+            ir: i32 = floor(clamp(pix.x, 0.0, 1.0) * 255.0)
+            ig: i32 = floor(clamp(pix.y, 0.0, 1.0) * 255.0)
+            ib: i32 = floor(clamp(pix.z, 0.0, 1.0) * 255.0)
+            row_str = row_str + f"{ir} {ig} {ib} "
+        }
+        row_str = row_str + "\n"
+        write_file("raytrace.ppm", row_str, "a")
+    }
+    
+    print("Wrote raytrace.ppm successfully!")
+}
+
+main()

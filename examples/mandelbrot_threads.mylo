@@ -1,0 +1,115 @@
+// The Mandelbrot set, rendered serially and across worker threads.
+// Mylo threads communicate through the bus, passing row data back to the main VM.
+//
+// Run:
+//   ./build/mylo examples/mandelbrot_threads.mylo
+
+W: i32 = 78
+H: i32 = 36
+MAXITER: i32 = 1000
+
+ramp: string = " .:-=+*#%@"
+
+// Iterations until |z| > 2, or MAXITER
+fn iterate(cx: f64, cy: f64) {
+    x: f64 = 0.0
+    y: f64 = 0.0
+    i: i32 = 0
+    for (i < MAXITER && (x * x + y * y) <= 4.0) {
+        nx: f64 = x * x - y * y + cx
+        y = 2.0 * x * y + cy
+        x = nx
+        i = i + 1
+    }
+    ret i
+}
+
+fn render_row(y: i32) {
+    row: string = ""
+    for (x in 0 ... W) {
+        cx: f64 = -2.2 + 3.0 * (x / 78.0)
+        cy: f64 = -1.2 + 2.4 * (y / 36.0)
+        n: i32 = iterate(cx, cy)
+        ch: string = "@"
+        if (n < MAXITER) {
+            idx: i32 = (n * 3) % 9
+            ch = ramp[idx]
+        }
+        row = row + ch
+    }
+    ret row
+}
+
+// Worker 1: top half of image (rows 0 .. 18)
+fn worker_task_1() {
+    for (y in 0 ... 18) {
+        r: string = render_row(y)
+        bus_set(f"worker_row_{y}", r)
+    }
+}
+
+// Worker 2: bottom half of image (rows 18 .. 36)
+fn worker_task_2() {
+    for (y in 18 ... 36) {
+        r: string = render_row(y)
+        bus_set(f"worker_row_{y}", r)
+    }
+}
+
+fn main() {
+    print("=== Mandelbrot Benchmark ===")
+    
+    // 1. Single-threaded render
+    t0: f64 = clock()
+    serial_rows: string[] = []
+    for (y in 0 ... H) {
+        serial_rows = serial_rows + [render_row(y)]
+    }
+    t1: f64 = clock()
+    serial_ms: f64 = (t1 - t0) * 1000.0
+
+    // 2. Multi-threaded render (split across 2 worker threads)
+    t_start: f64 = clock()
+    
+    w1: i32 = create_worker("worker_task_1")
+    w2: i32 = create_worker("worker_task_2")
+
+    // Wait for workers to complete
+    forever {
+        s1: i32 = check_worker(w1)
+        s2: i32 = check_worker(w2)
+        if (s1 == 1 && s2 == 1) {
+            break
+        }
+        sleep(5)
+    }
+
+    dock_worker(w1)
+    dock_worker(w2)
+    t_end: f64 = clock()
+    threaded_ms: f64 = (t_end - t_start) * 1000.0
+
+    // Collect threaded rows
+    threaded_rows: string[] = []
+    matches: i32 = 1
+    for (y in 0 ... H) {
+        tr: string = bus_get(f"worker_row_{y}")
+        threaded_rows = threaded_rows + [tr]
+        sr: string = serial_rows[y]
+        if (tr != sr) {
+            matches = 0
+        }
+    }
+
+    // Print the rendered Mandelbrot set
+    for (row in threaded_rows) {
+        print(row)
+    }
+
+    print("")
+    print(f"Rows match serial render: {matches == 1}")
+    print(f"Serial: {serial_ms} ms")
+    print(f"Threaded: {threaded_ms} ms")
+}
+
+main()
