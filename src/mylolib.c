@@ -638,7 +638,7 @@ void std_write_bytes(VM *vm) {
     exit(1);
   }
   int arr_type = (int)base[HEAP_OFFSET_TYPE];
-  if (arr_type != TYPE_ARRAY && arr_type != TYPE_BYTES && arr_type != TYPE_U8 && arr_type != TYPE_I8) {
+  if (arr_type == TYPE_STRUCT || arr_type == TYPE_MAP) {
     printf("Runtime Error: write_bytes expects array\n");
     exit(1);
   }
@@ -654,13 +654,19 @@ void std_write_bytes(VM *vm) {
 
   if (arr_type == TYPE_BYTES || arr_type == TYPE_U8 || arr_type == TYPE_I8) {
     unsigned char *raw = (unsigned char *)&base[HEAP_HEADER_ARRAY];
-    for (int i = 0; i < len; i++) {
-      fputc(raw[i], f);
-    }
+    fwrite(raw, 1, len, f);
   } else {
+    unsigned char chunk[65536];
+    int c = 0;
     for (int i = 0; i < len; i++) {
-      unsigned char b = (unsigned char)base[HEAP_HEADER_ARRAY + i];
-      fputc(b, f);
+      chunk[c++] = (unsigned char)((int)base[HEAP_HEADER_ARRAY + i] & 0xFF);
+      if (c == (int)sizeof(chunk)) {
+        fwrite(chunk, 1, c, f);
+        c = 0;
+      }
+    }
+    if (c > 0) {
+      fwrite(chunk, 1, c, f);
     }
   }
 
