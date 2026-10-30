@@ -116,7 +116,7 @@ bool pw_is_key_pressed_id(int handle, int key) {
     return pw_is_key_pressed(win, key);
 }
 
-void pw_clear_buffer(uint8_t* buffer, int width, int height, uint8_t r, uint8_t g, uint8_t b) {
+void pw_clear_buffer(uint8_t* buffer, intptr_t width, intptr_t height, intptr_t r, intptr_t g, intptr_t b) {
     if (!buffer) return;
     int total = width * height;
     for (int i = 0; i < total; i++) {

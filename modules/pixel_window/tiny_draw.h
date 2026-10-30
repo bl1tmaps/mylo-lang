@@ -22,19 +22,19 @@ extern "C" {
 #endif
 
 // Safely plots a single pixel to the RGB buffer.
-void td_draw_pixel(uint8_t* buffer, int buf_width, int buf_height, int x, int y, uint8_t r, uint8_t g, uint8_t b);
+void td_draw_pixel(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t r, intptr_t g, intptr_t b);
 
 // Draws a line using Bresenham's algorithm. Thickness > 1 uses a square-brush technique.
-void td_draw_line(uint8_t* buffer, int buf_width, int buf_height, int x0, int y0, int x1, int y1, int thickness, uint8_t r, uint8_t g, uint8_t b);
+void td_draw_line(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x0, intptr_t y0, intptr_t x1, intptr_t y1, intptr_t thickness, intptr_t r, intptr_t g, intptr_t b);
 
 // Draws a rectangle. If not filled, uses lines for the border based on thickness.
-void td_draw_rect(uint8_t* buffer, int buf_width, int buf_height, int x, int y, int w, int h, int thickness, bool filled, uint8_t r, uint8_t g, uint8_t b);
+void td_draw_rect(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t w, intptr_t h, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b);
 
 // Draws a circle. Filled and thick circles use a distance-squared bounding box (fast on MCUs).
-void td_draw_circle(uint8_t* buffer, int buf_width, int buf_height, int cx, int cy, int radius, int thickness, bool filled, uint8_t r, uint8_t g, uint8_t b);
+void td_draw_circle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t cx, intptr_t cy, intptr_t radius, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b);
 
 // Draws a triangle. Filled triangles use integer barycentric coordinates.
-void td_draw_triangle(uint8_t* buffer, int buf_width, int buf_height, int x1, int y1, int x2, int y2, int x3, int y3, int thickness, bool filled, uint8_t r, uint8_t g, uint8_t b);
+void td_draw_triangle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x1, intptr_t y1, intptr_t x2, intptr_t y2, intptr_t x3, intptr_t y3, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b);
 
 #ifdef __cplusplus
 }
@@ -54,17 +54,17 @@ void td_draw_triangle(uint8_t* buffer, int buf_width, int buf_height, int x1, in
 #define TD__MIN(a, b) ((a) < (b) ? (a) : (b))
 #define TD__MAX(a, b) ((a) > (b) ? (a) : (b))
 
-void td_draw_pixel(uint8_t* buffer, int buf_width, int buf_height, int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+void td_draw_pixel(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t r, intptr_t g, intptr_t b) {
     if (x < 0 || x >= buf_width || y < 0 || y >= buf_height) return;
     int idx = (y * buf_width + x) * 3;
-    buffer[idx] = r;
-    buffer[idx + 1] = g;
-    buffer[idx + 2] = b;
+    buffer[idx] = (uint8_t)r;
+    buffer[idx + 1] = (uint8_t)g;
+    buffer[idx + 2] = (uint8_t)b;
 }
 
-void td_draw_line(uint8_t* buffer, int buf_width, int buf_height, int x0, int y0, int x1, int y1, int thickness, uint8_t r, uint8_t g, uint8_t b) {
-    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+void td_draw_line(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x0, intptr_t y0, intptr_t x1, intptr_t y1, intptr_t thickness, intptr_t r, intptr_t g, intptr_t b) {
+    int dx = abs((int)(x1 - x0)), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs((int)(y1 - y0)), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy, e2;
 
     int half_t = thickness / 2;
@@ -88,7 +88,7 @@ void td_draw_line(uint8_t* buffer, int buf_width, int buf_height, int x0, int y0
     }
 }
 
-void td_draw_rect(uint8_t* buffer, int buf_width, int buf_height, int x, int y, int w, int h, int thickness, bool filled, uint8_t r, uint8_t g, uint8_t b) {
+void td_draw_rect(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t w, intptr_t h, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b) {
     if (filled) {
         for (int py = y; py < y + h; py++) {
             for (int px = x; px < x + w; px++) {
@@ -105,7 +105,7 @@ void td_draw_rect(uint8_t* buffer, int buf_width, int buf_height, int x, int y, 
     }
 }
 
-void td_draw_circle(uint8_t* buffer, int buf_width, int buf_height, int cx, int cy, int radius, int thickness, bool filled, uint8_t r, uint8_t g, uint8_t b) {
+void td_draw_circle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t cx, intptr_t cy, intptr_t radius, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b) {
     if (filled || thickness > 1) {
         // Distance-squared bounding box approach (Very compact and integer-only)
         int r_out = radius + thickness / 2;
@@ -152,7 +152,7 @@ void td_draw_circle(uint8_t* buffer, int buf_width, int buf_height, int cx, int 
     }
 }
 
-void td_draw_triangle(uint8_t* buffer, int buf_width, int buf_height, int x1, int y1, int x2, int y2, int x3, int y3, int thickness, bool filled, uint8_t r, uint8_t g, uint8_t b) {
+void td_draw_triangle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x1, intptr_t y1, intptr_t x2, intptr_t y2, intptr_t x3, intptr_t y3, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b) {
     if (filled) {
         // Integer Barycentric bounding box
         int minX = TD__MIN(x1, TD__MIN(x2, x3));
