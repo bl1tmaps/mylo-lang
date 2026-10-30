@@ -678,6 +678,8 @@ void pw_destroy_window(PixelWindow* win) {
 #include <proto/intuition.h>
 #include <cybergraphx/cybergraphics.h>
 #include <proto/cybergraphics.h>
+#include <libraries/Picasso96.h>
+#include <proto/Picasso96.h>
 #include <stdio.h>
 
 // Automatically allocate 128 KB of stack space when launched on AmigaOS
@@ -685,6 +687,7 @@ static const char __attribute__((used)) min_stack[] = "$STACK:131072";
 
 struct IntuitionBase *IntuitionBase = NULL;
 struct Library *CyberGfxBase = NULL;
+struct Library *P96Base = NULL;
 
 struct PixelWindow {
     int width;
@@ -726,15 +729,31 @@ static int pw__map_amiga_key(uint16_t code) {
 
 PixelWindow* pw_create_window(int width, int height, const char* title, bool resizable) {
     if (!IntuitionBase) IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39);
-    if (!CyberGfxBase) CyberGfxBase = OpenLibrary("cybergraphics.library", 0);
-    if (!CyberGfxBase) CyberGfxBase = OpenLibrary("p96.library", 0); // Modern P96 fallback
-
     if (!IntuitionBase) {
         printf("[ERROR] Failed to open intuition.library v39+\n");
         return NULL;
     }
-    if (!CyberGfxBase) {
-        printf("[ERROR] Failed to open cybergraphics.library or p96.library\n");
+
+    if (!CyberGfxBase && !P96Base) {
+        // 1. Try standard cybergraphics.library
+        CyberGfxBase = OpenLibrary("cybergraphics.library", 41);
+        if (!CyberGfxBase) CyberGfxBase = OpenLibrary("cybergraphics.library", 0);
+        // 2. Try Picasso96's CGX wrapper in LIBS:Picasso96/
+        if (!CyberGfxBase) CyberGfxBase = OpenLibrary("Picasso96/cybergraphics.library", 0);
+        if (!CyberGfxBase) CyberGfxBase = OpenLibrary("LIBS:Picasso96/cybergraphics.library", 0);
+        if (!CyberGfxBase) CyberGfxBase = OpenLibrary("LIBS:cybergraphics.library", 0);
+
+        // 3. Try native Picasso96API.library
+        if (!CyberGfxBase) {
+            P96Base = OpenLibrary("Picasso96API.library", 2);
+            if (!P96Base) P96Base = OpenLibrary("Picasso96API.library", 0);
+            if (!P96Base) P96Base = OpenLibrary("LIBS:Picasso96API.library", 0);
+        }
+    }
+
+    if (!CyberGfxBase && !P96Base) {
+        printf("[ERROR] Failed to open cybergraphics.library or Picasso96API.library\n");
+        printf("        Please ensure an RTG system (Picasso96 or CyberGraphX) is installed in LIBS:\n");
         return NULL;
     }
 
@@ -835,11 +854,24 @@ void pw_update_window(PixelWindow* win, const uint8_t* rgb_buffer) {
                  0xFF;                            
     }
 
-    WritePixelArray(win->rtg_buffer, 0, 0, win->width * 4,
-                    win->amg_win->RPort, 
-                    win->amg_win->BorderLeft, 
-                    win->amg_win->BorderTop, 
-                    win->width, win->height, RECTFMT_RGBA);
+    if (CyberGfxBase) {
+        WritePixelArray(win->rtg_buffer, 0, 0, win->width * 4,
+                        win->amg_win->RPort, 
+                        win->amg_win->BorderLeft, 
+                        win->amg_win->BorderTop, 
+                        win->width, win->height, RECTFMT_RGBA);
+    } else if (P96Base) {
+        struct RenderInfo ri;
+        ri.Memory = win->rtg_buffer;
+        ri.BytesPerRow = win->width * 4;
+        ri.pad = 0;
+        ri.RGBFormat = RGBFB_R8G8B8A8;
+        p96WritePixelArray(&ri, 0, 0,
+                           win->amg_win->RPort,
+                           win->amg_win->BorderLeft,
+                           win->amg_win->BorderTop,
+                           win->width, win->height);
+    }
 }
 
 void pw_destroy_window(PixelWindow* win) {
@@ -848,8 +880,18 @@ void pw_destroy_window(PixelWindow* win) {
     if (win->rtg_buffer) free(win->rtg_buffer);
     free(win);
     
-    if (CyberGfxBase) CloseLibrary(CyberGfxBase);
-    if (IntuitionBase) CloseLibrary((struct Library *)IntuitionBase);
+    if (CyberGfxBase) {
+        CloseLibrary(CyberGfxBase);
+        CyberGfxBase = NULL;
+    }
+    if (P96Base) {
+        CloseLibrary(P96Base);
+        P96Base = NULL;
+    }
+    if (IntuitionBase) {
+        CloseLibrary((struct Library *)IntuitionBase);
+        IntuitionBase = NULL;
+    }
 }
 #endif // __amigaos__
 

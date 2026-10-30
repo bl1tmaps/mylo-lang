@@ -13,7 +13,7 @@ This guide details how to build the core **Mylo** executable with integrated **P
 
 ### Why Pixel-Window on AmigaOS?
 Pixel-Window is a minimal, header-only C library with native AmigaOS support. On AmigaOS, it:
-1. Automatically opens `intuition.library` (v39+) and `cybergraphics.library` (or fallback to `p96.library`).
+1. Automatically opens `intuition.library` (v39+) and either `cybergraphics.library` or `Picasso96API.library` (Picasso96 / P96).
 2. Creates an Intuition window on the Workbench or RTG screen.
 3. Maps raw Amiga keyboard and mouse events to unified keycodes and normalized coordinates.
 4. Blits a standard 24-bit RGB packed pixel buffer directly to the screen via hardware-accelerated RTG `WritePixelArray`.

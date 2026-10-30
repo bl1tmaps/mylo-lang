@@ -19,6 +19,8 @@ void compiler_reset();
 void disassemble(VM* vm);
 extern void enter_debugger(VM* vm);
 
+static const char __attribute__((used)) min_stack[] = "$STACK:262144";
+
 // extern the counters from compiler.c
 extern int ffi_count;
 extern int bound_ffi_count;
