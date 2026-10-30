@@ -72,6 +72,7 @@ extern FFIBlock ffi_blocks[MAX_NATIVES];
 extern int ffi_count;
 extern int bound_ffi_count;
 void dynamic_cfn_invoker(VM* vm);
+extern char current_file_dir[1024];
 
 // Expose the tables to the Debugger
 extern Symbol globals[MAX_GLOBALS];

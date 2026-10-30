@@ -86,6 +86,7 @@ typedef struct {
 FFIBlock ffi_blocks[MAX_NATIVES];
 int ffi_count = 0;
 int bound_ffi_count = 0;
+char current_file_dir[1024] = ".";
 
 static char *src;
 static char *current_file_start = NULL;
@@ -308,19 +309,29 @@ int find_stdlib_func(char *name) {
     return -1;
 }
 
-int find_cfn(char *name) {
-    for (int i = 0; i < ffi_count; i++) {
-        if (strlen(ffi_blocks[i].func_name) > 0 && strcmp(ffi_blocks[i].func_name, name) == 0) return i;
-    }
-    return -1;
-}
-
 void get_mangled_name(char *out, char *raw_name) {
     if (strlen(current_namespace) > 0) {
         sprintf(out, "%s_%s", current_namespace, raw_name);
     } else {
         strcpy(out, raw_name);
     }
+}
+
+int find_cfn(char *name) {
+    for (int i = 0; i < ffi_count; i++) {
+        if (strlen(ffi_blocks[i].func_name) > 0 && strcmp(ffi_blocks[i].func_name, name) == 0) return i;
+    }
+    char m[MAX_IDENTIFIER * 2];
+    get_mangled_name(m, name);
+    if (strcmp(m, name) != 0) {
+        for (int i = 0; i < ffi_count; i++) {
+            if (strlen(ffi_blocks[i].func_name) > 0 && strcmp(ffi_blocks[i].func_name, m) == 0) return i;
+        }
+    }
+    for (int i = 0; i < ffi_count; i++) {
+        if (strlen(ffi_blocks[i].c_symbol_name) > 0 && strcmp(ffi_blocks[i].c_symbol_name, name) == 0) return i;
+    }
+    return -1;
 }
 
 void dynamic_cfn_invoker(VM* vm) {
@@ -385,7 +396,15 @@ void dynamic_cfn_invoker(VM* vm) {
                 case 6: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5]); break;
                 case 7: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6]); break;
                 case 8: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7]); break;
-                default: printf("Dynamic CFN supports up to 8 arguments\n"); mylo_exit(1);
+                case 9: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8]); break;
+                case 10: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9]); break;
+                case 11: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10]); break;
+                case 12: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11]); break;
+                case 13: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12]); break;
+                case 14: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13]); break;
+                case 15: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13], a_int[14]); break;
+                case 16: ((void (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13], a_int[14], a_int[15]); break;
+                default: printf("Dynamic CFN supports up to 16 arguments\n"); mylo_exit(1);
             }
         } else {
             if (block->arg_count == 1) ((void (*)(double))fn)(a_dbl[0]);
@@ -457,7 +476,15 @@ void dynamic_cfn_invoker(VM* vm) {
         case 6: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5]); break;
         case 7: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6]); break;
         case 8: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7]); break;
-        default: printf("Dynamic CFN supports up to 8 arguments\n"); mylo_exit(1);
+        case 9: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8]); break;
+        case 10: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9]); break;
+        case 11: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10]); break;
+        case 12: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11]); break;
+        case 13: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12]); break;
+        case 14: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13]); break;
+        case 15: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13], a_int[14]); break;
+        case 16: ret_i = ((intptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t))fn)(a_int[0], a_int[1], a_int[2], a_int[3], a_int[4], a_int[5], a_int[6], a_int[7], a_int[8], a_int[9], a_int[10], a_int[11], a_int[12], a_int[13], a_int[14], a_int[15]); break;
+        default: printf("Dynamic CFN supports up to 16 arguments\n"); mylo_exit(1);
     }
     vm_push(vm, (double)ret_i, T_NUM);
 }
@@ -760,6 +787,8 @@ void next_token() {
         else if (strcmp(curr.text, "array") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "map") == 0) curr.type = TK_TYPE_DEF;
         else if (strcmp(curr.text, "any") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "bytes") == 0) curr.type = TK_TYPE_DEF;
+        else if (strcmp(curr.text, "void") == 0) curr.type = TK_TYPE_DEF;
         else curr.type = TK_ID;
         curr.length = (int) (src - curr.start);
         return;
@@ -866,6 +895,8 @@ int get_type_id_from_token(const char *txt) {
     if (strcmp(txt, "struct") == 0) return TYPE_STRUCT;
     if (strcmp(txt, "enum") == 0) return TYPE_ENUM;
     if (strcmp(txt, "any") == 0) return TYPE_ANY;
+    if (strcmp(txt, "bytes") == 0) return TYPE_BYTES;
+    if (strcmp(txt, "void") == 0) return TYPE_ANY;
     if (strcmp(txt, "num") == 0) {
         error("Type 'num' has been removed");
     }
@@ -1330,7 +1361,7 @@ void factor() {
         int id = make_string(compiling_vm, curr.text);
         emit(OP_PSH_STR); emit(id); emit(OP_MK_BYTES);
         match(TK_BSTR);
-    } else if (curr.type == TK_ID) {
+    } else if (curr.type == TK_ID || curr.type == TK_TYPE_DEF) {
         Token start_token = curr;
         char name[MAX_IDENTIFIER];
         parse_namespaced_id(name);
@@ -1745,7 +1776,15 @@ static void parse_import() {
         char resolved_path[2048];
         strcpy(resolved_path, filename); // Track true location for .so loading
 
-        // 1. Check module_path entries
+        // 1. Check relative to current_file_dir (e.g. if script is in ../modules/pixel_window/)
+        if (!c && strcmp(current_file_dir, ".") != 0) {
+            char tmp[2048];
+            snprintf(tmp, sizeof(tmp), "%s/%s", current_file_dir, filename);
+            c = read_file(tmp);
+            if (c) strcpy(resolved_path, tmp);
+        }
+
+        // 2. Check module_path entries
         if (!c) {
             for (int i = 0; i < search_path_count; i++) {
                 char tmp[MAX_STRING_LENGTH];
@@ -1755,10 +1794,21 @@ static void parse_import() {
             }
         }
 
-        // 2. NEW: Recursive search in `<exe_dir>/modules/`
+        // 3. Recursive search in `<exe_dir>/modules/`
         if (!c) {
             char modules_path[2048];
             snprintf(modules_path, sizeof(modules_path), "%s/modules", mylo_exe_dir);
+            char* found_path = find_file_recursive(modules_path, filename);
+            if (found_path) {
+                c = read_file(found_path);
+                strcpy(resolved_path, found_path);
+            }
+        }
+
+        // 4. Recursive search in `<exe_dir>/../modules/` (e.g. when executing from build/)
+        if (!c) {
+            char modules_path[2048];
+            snprintf(modules_path, sizeof(modules_path), "%s/../modules", mylo_exe_dir);
             char* found_path = find_file_recursive(modules_path, filename);
             if (found_path) {
                 c = read_file(found_path);
@@ -1776,43 +1826,56 @@ static void parse_import() {
             // Use the fully resolved path so the .so file is located properly!
             get_lib_name(lib_name, resolved_path);
 
-            if (!MyloConfig.debug_mode) fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
             void *lib = load_library(lib_name);
-            if (!lib) error("Could not load native binary '%s'", lib_name);
+            if (!lib) {
+                // If no shared library is found, check if all added natives are cfn functions and already bound dynamically!
+                bool all_bound = (added_natives > 0);
+                for (int i = start_ffi_index; i < ffi_count; i++) {
+                    if (!ffi_blocks[i].is_bound) {
+                        all_bound = false;
+                        break;
+                    }
+                }
+                if (!all_bound) {
+                    if (!MyloConfig.debug_mode) fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
+                    error("Could not load native binary '%s'", lib_name);
+                }
+            } else {
+                if (!MyloConfig.debug_mode) fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
+                typedef void (*BindFunc)(VM *, int, MyloAPI *);
+                BindFunc binder = (BindFunc) get_symbol(lib, "mylo_bind_lib");
+                if (!binder) error("Native module '%s' invalid", lib_name);
 
-            typedef void (*BindFunc)(VM *, int, MyloAPI *);
-            BindFunc binder = (BindFunc) get_symbol(lib, "mylo_bind_lib");
-            if (!binder) error("Native module '%s' invalid", lib_name);
+                MyloAPI api;
+                api.push = vm_push;
+                api.pop = vm_pop;
+                api.make_string = make_string;
+                api.heap_alloc = heap_alloc;
+                api.resolve_ptr = vm_resolve_ptr;
+                api.store_copy = vm_store_copy;
+                api.store_ptr = vm_store_ptr;
+                api.get_ref = vm_get_ref;
+                api.free_ref = vm_free_ref;
+                api.natives_array = compiling_vm->natives;
+                api.string_pool = compiling_vm->string_pool;
+                api.find_function = vm_find_function;
+                api.exec_vm_from = run_vm_from;
 
-            MyloAPI api;
-            api.push = vm_push;
-            api.pop = vm_pop;
-            api.make_string = make_string;
-            api.heap_alloc = heap_alloc;
-            api.resolve_ptr = vm_resolve_ptr;
-            api.store_copy = vm_store_copy;
-            api.store_ptr = vm_store_ptr;
-            api.get_ref = vm_get_ref;
-            api.free_ref = vm_free_ref;
-            api.natives_array = compiling_vm->natives;
-            api.string_pool = compiling_vm->string_pool;
-            api.find_function = vm_find_function;
-            api.exec_vm_from = run_vm_from;
+                binder(compiling_vm, std_count + start_ffi_index, &api);
+                bound_ffi_count += added_natives;
 
-            binder(compiling_vm, std_count + start_ffi_index, &api);
-            bound_ffi_count += added_natives;
+                if (compiling_vm->dependency_count < MAX_DEPENDENCIES) {
+                    Dependency* dep = &compiling_vm->dependencies[compiling_vm->dependency_count++];
 
-            if (compiling_vm->dependency_count < MAX_DEPENDENCIES) {
-                Dependency* dep = &compiling_vm->dependencies[compiling_vm->dependency_count++];
-
-                // FIX: Strip directories so we only embed the base filename into the bundle
-                char clean_lib_name[MAX_STRING_LENGTH];
-                char* slash = strrchr(filename, '/');
-                char* backslash = strrchr(filename, '\\');
-                char* base_filename = (slash > backslash) ? slash + 1 : (backslash ? backslash + 1 : filename);
-                get_lib_name(clean_lib_name, base_filename);
-                strcpy(dep->name, clean_lib_name);
-                dep->start_index = std_count + start_ffi_index;
+                    // FIX: Strip directories so we only embed the base filename into the bundle
+                    char clean_lib_name[MAX_STRING_LENGTH];
+                    char* slash = strrchr(filename, '/');
+                    char* backslash = strrchr(filename, '\\');
+                    char* base_filename = (slash > backslash) ? slash + 1 : (backslash ? backslash + 1 : filename);
+                    get_lib_name(clean_lib_name, base_filename);
+                    strcpy(dep->name, clean_lib_name);
+                    dep->start_index = std_count + start_ffi_index;
+                }
             }
         }
     }
@@ -1898,7 +1961,14 @@ static void parse_import() {
 
         char *c = read_file(f);
 
-        // 1. Check module_path entries
+        // 1. Check relative to current_file_dir (e.g. if script is in ../modules/pixel_window/)
+        if (!c && strcmp(current_file_dir, ".") != 0) {
+            char tmp[2048];
+            snprintf(tmp, sizeof(tmp), "%s/%s", current_file_dir, f);
+            c = read_file(tmp);
+        }
+
+        // 2. Check module_path entries
         if (!c) {
             for (int i = 0; i < search_path_count; i++) {
                 char tmp[MAX_STRING_LENGTH];
@@ -1908,10 +1978,18 @@ static void parse_import() {
             }
         }
 
-        // 2. NEW: Recursive search in `<exe_dir>/modules/`
+        // 3. Recursive search in `<exe_dir>/modules/`
         if (!c) {
             char modules_path[2048];
             snprintf(modules_path, sizeof(modules_path), "%s/modules", mylo_exe_dir);
+            char* found_path = find_file_recursive(modules_path, f);
+            if (found_path) c = read_file(found_path);
+        }
+
+        // 4. Recursive search in `<exe_dir>/../modules/` (e.g. when executing from build/)
+        if (!c) {
+            char modules_path[2048];
+            snprintf(modules_path, sizeof(modules_path), "%s/../modules", mylo_exe_dir);
             char* found_path = find_file_recursive(modules_path, f);
             if (found_path) c = read_file(found_path);
         }
@@ -2804,7 +2882,7 @@ void statement() {
         parse_c_block_stmt();
     } else if (curr.type == TK_FOR) {
         for_statement();
-    } else if (curr.type == TK_ID) {
+    } else if (curr.type == TK_ID || curr.type == TK_TYPE_DEF) {
         Token start_token = curr;
         char name[MAX_IDENTIFIER];
         parse_namespaced_id(name);
@@ -2907,6 +2985,10 @@ void parse_function_body(char* registered_name, char* mangled_name, int implicit
         if (curr.type == TK_COMMA) match(TK_COMMA);
     }
     match(TK_RPAREN);
+    if (curr.type == TK_ARROW) {
+        match(TK_ARROW);
+        parse_type_spec();
+    }
     match(TK_LBRACE);
 
     // [NEW] Function Scope

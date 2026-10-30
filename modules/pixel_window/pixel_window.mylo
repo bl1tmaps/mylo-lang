@@ -1,0 +1,141 @@
+import C "pixel_window.h"
+import C "tiny_draw.h"
+import C "tiny_glyph.h"
+
+mod PW {
+
+    struct RGB {
+        r: u8
+        g: u8
+        b: u8
+    }
+
+    // Common Colors
+    RED: RGB     = {r=255, g=0, b=0}
+    GREEN: RGB   = {r=0, g=255, b=0}
+    BLUE: RGB    = {r=0, g=0, b=255}
+    WHITE: RGB   = {r=255, g=255, b=255}
+    BLACK: RGB   = {r=0, g=0, b=0}
+    YELLOW: RGB  = {r=255, g=255, b=0}
+    CYAN: RGB    = {r=0, g=255, b=255}
+    MAGENTA: RGB = {r=255, g=0, b=255}
+    GRAY: RGB    = {r=128, g=128, b=128}
+
+    // Key Constants (matching PwKey)
+    KEY_BACKSPACE: i32 = 8
+    KEY_TAB: i32       = 9
+    KEY_ENTER: i32     = 10
+    KEY_ESCAPE: i32    = 27
+    KEY_SPACE: i32     = 32
+
+    KEY_LEFT: i32      = 256
+    KEY_RIGHT: i32     = 257
+    KEY_UP: i32        = 258
+    KEY_DOWN: i32      = 259
+
+    KEY_LSHIFT: i32    = 260
+    KEY_RSHIFT: i32    = 261
+    KEY_LCTRL: i32     = 262
+    KEY_RCTRL: i32     = 263
+    KEY_LALT: i32      = 264
+    KEY_RALT: i32      = 265
+
+    // Native C Function Prototypes (resolved dynamically or statically)
+    cfn pw_create_window_id(width: i32, height: i32, title: str, resizable: bool) -> i32
+    cfn pw_process_events_id(win: i32) -> bool
+    cfn pw_update_window_id(win: i32, buffer: u8[])
+    cfn pw_destroy_window_id(win: i32)
+
+    cfn pw_get_mouse_x_id(win: i32) -> f32
+    cfn pw_get_mouse_y_id(win: i32) -> f32
+    cfn pw_is_mouse_down_id(win: i32, button: i32) -> bool
+    cfn pw_is_mouse_pressed_id(win: i32, button: i32) -> bool
+    cfn pw_is_key_down_id(win: i32, key: i32) -> bool
+    cfn pw_is_key_pressed_id(win: i32, key: i32) -> bool
+    cfn pw_clear_buffer(buffer: u8[], width: i32, height: i32, r: u8, g: u8, b: u8)
+
+    // TinyDraw Bindings
+    cfn td_draw_pixel(buffer: u8[], width: i32, height: i32, x: i32, y: i32, r: u8, g: u8, b: u8)
+    cfn td_draw_line(buffer: u8[], width: i32, height: i32, x0: i32, y0: i32, x1: i32, y1: i32, thickness: i32, r: u8, g: u8, b: u8)
+    cfn td_draw_rect(buffer: u8[], width: i32, height: i32, x: i32, y: i32, w: i32, h: i32, thickness: i32, filled: bool, r: u8, g: u8, b: u8)
+    cfn td_draw_circle(buffer: u8[], width: i32, height: i32, cx: i32, cy: i32, radius: i32, thickness: i32, filled: bool, r: u8, g: u8, b: u8)
+    cfn td_draw_triangle(buffer: u8[], width: i32, height: i32, x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32, thickness: i32, filled: bool, r: u8, g: u8, b: u8)
+
+    // TinyGlyph Bindings
+    cfn draw_string_rgb(buffer: u8[], width: i32, height: i32, text: str, x: i32, y: i32, size: i32, r: u8, g: u8, b: u8)
+
+    // Friendly Wrapper Functions
+    fn create_window(width: i32, height: i32, title: str, resizable: bool) -> i32 {
+        ret pw_create_window_id(width, height, title, resizable)
+    }
+
+    fn process_events(win: i32) -> bool {
+        ret pw_process_events_id(win)
+    }
+
+    fn update_window(win: i32, buffer: u8[]) {
+        pw_update_window_id(win, buffer)
+    }
+
+    fn destroy_window(win: i32) {
+        pw_destroy_window_id(win)
+    }
+
+    fn create_buffer(width: i32, height: i32) -> u8[] {
+        total: i32 = width * height * 3
+        buf: u8[] = [0...total]
+        ret buf
+    }
+
+    fn clear_buffer(buffer: u8[], width: i32, height: i32, r: u8, g: u8, b: u8) {
+        pw_clear_buffer(buffer, width, height, r, g, b)
+    }
+
+    fn draw_pixel(buffer: u8[], width: i32, height: i32, x: i32, y: i32, r: u8, g: u8, b: u8) {
+        td_draw_pixel(buffer, width, height, x, y, r, g, b)
+    }
+
+    fn draw_line(buffer: u8[], width: i32, height: i32, x0: i32, y0: i32, x1: i32, y1: i32, thickness: i32, r: u8, g: u8, b: u8) {
+        td_draw_line(buffer, width, height, x0, y0, x1, y1, thickness, r, g, b)
+    }
+
+    fn draw_rect(buffer: u8[], width: i32, height: i32, x: i32, y: i32, w: i32, h: i32, thickness: i32, filled: bool, r: u8, g: u8, b: u8) {
+        td_draw_rect(buffer, width, height, x, y, w, h, thickness, filled, r, g, b)
+    }
+
+    fn draw_circle(buffer: u8[], width: i32, height: i32, cx: i32, cy: i32, radius: i32, thickness: i32, filled: bool, r: u8, g: u8, b: u8) {
+        td_draw_circle(buffer, width, height, cx, cy, radius, thickness, filled, r, g, b)
+    }
+
+    fn draw_triangle(buffer: u8[], width: i32, height: i32, x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32, thickness: i32, filled: bool, r: u8, g: u8, b: u8) {
+        td_draw_triangle(buffer, width, height, x1, y1, x2, y2, x3, y3, thickness, filled, r, g, b)
+    }
+
+    fn draw_text(buffer: u8[], width: i32, height: i32, text: str, x: i32, y: i32, size: i32, r: u8, g: u8, b: u8) {
+        draw_string_rgb(buffer, width, height, text, x, y, size, r, g, b)
+    }
+
+    fn get_mouse_x(win: i32) -> f32 {
+        ret pw_get_mouse_x_id(win)
+    }
+
+    fn get_mouse_y(win: i32) -> f32 {
+        ret pw_get_mouse_y_id(win)
+    }
+
+    fn is_mouse_down(win: i32, button: i32) -> bool {
+        ret pw_is_mouse_down_id(win, button)
+    }
+
+    fn is_mouse_pressed(win: i32, button: i32) -> bool {
+        ret pw_is_mouse_pressed_id(win, button)
+    }
+
+    fn is_key_down(win: i32, key: i32) -> bool {
+        ret pw_is_key_down_id(win, key)
+    }
+
+    fn is_key_pressed(win: i32, key: i32) -> bool {
+        ret pw_is_key_pressed_id(win, key)
+    }
+}

@@ -2238,6 +2238,10 @@ void get_lib_name(char* out, const char* base_name) {
 }
 
 void* load_library(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    fclose(f);
+
 #ifdef _WIN32
     HMODULE h = LoadLibraryA(path);
     if (!h)

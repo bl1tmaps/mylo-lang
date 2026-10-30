@@ -401,6 +401,7 @@ int main(int argc, char** argv) {
     }
 
     get_executable_dir(mylo_exe_dir, sizeof(mylo_exe_dir), argv[0]);
+    get_executable_dir(current_file_dir, sizeof(current_file_dir), fn);
     // Apply TUI Debugger settings to VM instance
     vm.source_code = content;
     vm.cli_debug_mode = cli_debug_mode;
