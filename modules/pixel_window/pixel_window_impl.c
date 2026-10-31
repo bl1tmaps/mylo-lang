@@ -127,6 +127,41 @@ void pw_clear_buffer(uint8_t* buffer, intptr_t width, intptr_t height, intptr_t 
     }
 }
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+bool pw_load_image_info(const char* filename, int32_t* out_info) {
+    if (!filename || !out_info) return false;
+    int w = 0, h = 0, channels = 0;
+    if (stbi_info(filename, &w, &h, &channels)) {
+        out_info[0] = w;
+        out_info[1] = h;
+        out_info[2] = channels;
+        return true;
+    }
+    return false;
+}
+
+bool pw_load_image_pixels_rgba(const char* filename, uint8_t* out_buffer) {
+    if (!filename || !out_buffer) return false;
+    int w = 0, h = 0, channels = 0;
+    stbi_uc* data = stbi_load(filename, &w, &h, &channels, 4);
+    if (!data) return false;
+    memcpy(out_buffer, data, (size_t)w * h * 4);
+    stbi_image_free(data);
+    return true;
+}
+
+bool pw_load_image_pixels_rgb(const char* filename, uint8_t* out_buffer) {
+    if (!filename || !out_buffer) return false;
+    int w = 0, h = 0, channels = 0;
+    stbi_uc* data = stbi_load(filename, &w, &h, &channels, 3);
+    if (!data) return false;
+    memcpy(out_buffer, data, (size_t)w * h * 3);
+    stbi_image_free(data);
+    return true;
+}
+
 #ifdef __cplusplus
 }
 #endif

@@ -298,6 +298,8 @@ void std_sqrt(VM *vm) { vm_push(vm, sqrt(vm_pop(vm)), T_NUM); }
 void std_sin(VM *vm) { vm_push(vm, sin(vm_pop(vm)), T_NUM); }
 void std_cos(VM *vm) { vm_push(vm, cos(vm_pop(vm)), T_NUM); }
 void std_tan(VM *vm) { vm_push(vm, tan(vm_pop(vm)), T_NUM); }
+void std_atan(VM *vm) { vm_push(vm, atan(vm_pop(vm)), T_NUM); }
+void std_atan2(VM *vm) { double x = vm_pop(vm); double y = vm_pop(vm); vm_push(vm, atan2(y, x), T_NUM); }
 void std_floor(VM *vm) { vm_push(vm, floor(vm_pop(vm)), T_NUM); }
 void std_ceil(VM *vm) { vm_push(vm, ceil(vm_pop(vm)), T_NUM); }
 
@@ -2236,37 +2238,68 @@ void std_web_triangle(VM *vm) {
 }
 #define RUNTIME_ERROR(fmt, ...) mylo_runtime_error(vm, fmt, ##__VA_ARGS__)
 
+void std_function_exists(VM *vm) {
+  double name_val = vm_pop(vm);
+  int name_type = vm->stack_types[vm->sp + 1];
+  if (name_type != T_STR) {
+    vm_push(vm, 0.0, T_NUM);
+    return;
+  }
+  const char *func_name = vm->string_pool[(int)name_val];
+  int target_ip = vm_find_function(vm, func_name);
+  if (target_ip != -1) {
+    vm_push(vm, 1.0, T_NUM);
+    return;
+  }
+  for (int i = 0; std_library[i].name != NULL; i++) {
+    if (strcmp(std_library[i].name, func_name) == 0) {
+      vm_push(vm, 1.0, T_NUM);
+      return;
+    }
+  }
+  vm_push(vm, 0.0, T_NUM);
+}
+
 void std_call(VM *vm) {
-  // 1. Pop arguments: call("func_name", [args])
+  // 1. Pop arguments: call("func_name", [args] or single_arg)
   double arr_val = vm_pop(vm);
   int arr_type = vm->stack_types[vm->sp + 1];
 
   double name_val = vm_pop(vm);
   int name_type = vm->stack_types[vm->sp + 1];
 
-  if (name_type != T_STR || arr_type != T_OBJ) {
-    RUNTIME_ERROR("call() expects (str, array) as arguments.");
+  if (name_type != T_STR) {
+    RUNTIME_ERROR("call() expects function name string as first argument.");
   }
 
   const char *func_name = vm->string_pool[(int)name_val];
 
+  int argc = 0;
+  double single_val = 0;
+  int single_type = 0;
+  bool is_array = false;
+
   double *base = vm_resolve_ptr_safe(vm, arr_val);
   int *types = vm_resolve_type(vm, arr_val);
 
-  // Verify it is a standard array
-  if (!base || (int)base[HEAP_OFFSET_TYPE] != TYPE_ARRAY) {
-    RUNTIME_ERROR("call() expects a valid array for arguments.");
+  if (arr_type == T_OBJ && base && (int)base[HEAP_OFFSET_TYPE] == TYPE_ARRAY) {
+    is_array = true;
+    argc = (int)base[HEAP_OFFSET_LEN];
+  } else {
+    is_array = false;
+    argc = 1;
+    single_val = arr_val;
+    single_type = arr_type;
   }
-
-  int argc = (int)base[HEAP_OFFSET_LEN];
 
   // --- 1. Keyword "print" Intercept ---
   if (strcmp(func_name, "print") == 0) {
     for (int i = 0; i < argc; i++) {
       if (i > 0)
         print_raw(vm, " ");
-      print_recursive(vm, base[HEAP_HEADER_ARRAY + i],
-                      types[HEAP_HEADER_ARRAY + i], 0, -1);
+      double v = is_array ? base[HEAP_HEADER_ARRAY + i] : single_val;
+      int t = is_array ? types[HEAP_HEADER_ARRAY + i] : single_type;
+      print_recursive(vm, v, t, 0, -1);
     }
     print_raw(vm, "\n");
     vm_push(vm, 0.0, T_NUM); // print returns nothing, default to 0
@@ -2285,7 +2318,9 @@ void std_call(VM *vm) {
   if (std_idx != -1) {
     // Push arguments back to stack for the native function
     for (int i = 0; i < argc; i++) {
-      vm_push(vm, base[HEAP_HEADER_ARRAY + i], types[HEAP_HEADER_ARRAY + i]);
+      double v = is_array ? base[HEAP_HEADER_ARRAY + i] : single_val;
+      int t = is_array ? types[HEAP_HEADER_ARRAY + i] : single_type;
+      vm_push(vm, v, t);
     }
     if (vm->natives[std_idx])
       vm->natives[std_idx](vm);
@@ -2297,7 +2332,9 @@ void std_call(VM *vm) {
   if (target_ip != -1) {
     // Push arguments to stack
     for (int i = 0; i < argc; i++) {
-      vm_push(vm, base[HEAP_HEADER_ARRAY + i], types[HEAP_HEADER_ARRAY + i]);
+      double v = is_array ? base[HEAP_HEADER_ARRAY + i] : single_val;
+      int t = is_array ? types[HEAP_HEADER_ARRAY + i] : single_type;
+      vm_push(vm, v, t);
     }
 
     // Mimic OP_CALL stack framing
@@ -2817,6 +2854,8 @@ const StdLibDef std_library[] = {
     {"sin", std_sin, "num", 1, {"num"}},
     {"cos", std_cos, "num", 1, {"num"}},
     {"tan", std_tan, "num", 1, {"num"}},
+    {"atan", std_atan, "num", 1, {"num"}},
+    {"atan2", std_atan2, "num", 2, {"num", "num"}},
     {"floor", std_floor, "num", 1, {"num"}},
     {"ceil", std_ceil, "num", 1, {"num"}},
     {"read_lines", std_read_lines, "arr", 1, {"str"}},
@@ -2870,6 +2909,7 @@ const StdLibDef std_library[] = {
      7,
      {"num", "num", "num", "num", "num", "num", "str"}},
     {"call", std_call, "any", 2, {"str", "any"}},
+    {"function_exists", std_function_exists, "num", 1, {"str"}},
     {"filter", std_filter, "arr", 2, {"arr", "str"}},
     {"param_filter", std_param_filter, "arr", 3, {"arr", "str", "any"}},
     {"clock", std_clock, "num", 0, {NULL}},

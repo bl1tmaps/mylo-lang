@@ -36,6 +36,30 @@ void td_draw_circle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, in
 // Draws a triangle. Filled triangles use integer barycentric coordinates.
 void td_draw_triangle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x1, intptr_t y1, intptr_t x2, intptr_t y2, intptr_t x3, intptr_t y3, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b);
 
+// Fast sprite blitting with optional color-key transparency (key_r < 0 disables chromakey)
+void td_blit_sprite(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+                    const uint8_t* src, intptr_t src_w, intptr_t src_h,
+                    intptr_t dx, intptr_t dy,
+                    intptr_t key_r, intptr_t key_g, intptr_t key_b);
+
+// Blit a sub-rectangle of an RGB sprite (e.g. sprite sheet or tileset) with optional chromakey
+void td_blit_subimage(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+                      const uint8_t* src, intptr_t src_w, intptr_t src_h,
+                      intptr_t dx, intptr_t dy,
+                      intptr_t sx, intptr_t sy, intptr_t sw, intptr_t sh,
+                      intptr_t key_r, intptr_t key_g, intptr_t key_b);
+
+// Fast RGBA sprite blitting with alpha blending
+void td_blit_sprite_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+                         const uint8_t* src, intptr_t src_w, intptr_t src_h,
+                         intptr_t dx, intptr_t dy);
+
+// Sub-rectangle RGBA blit with alpha blending
+void td_blit_subimage_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+                           const uint8_t* src, intptr_t src_w, intptr_t src_h,
+                           intptr_t dx, intptr_t dy,
+                           intptr_t sx, intptr_t sy, intptr_t sw, intptr_t sh);
+
 #ifdef __cplusplus
 }
 #endif
@@ -177,6 +201,104 @@ void td_draw_triangle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, 
         td_draw_line(buffer, buf_width, buf_height, x2, y2, x3, y3, thickness, r, g, b);
         td_draw_line(buffer, buf_width, buf_height, x3, y3, x1, y1, thickness, r, g, b);
     }
+}
+
+void td_blit_subimage(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+                      const uint8_t* src, intptr_t src_w, intptr_t src_h,
+                      intptr_t dx, intptr_t dy,
+                      intptr_t sx, intptr_t sy, intptr_t sw, intptr_t sh,
+                      intptr_t key_r, intptr_t key_g, intptr_t key_b) {
+    if (!dst || !src || sw <= 0 || sh <= 0) return;
+
+    // Clip source rect to src bounds
+    if (sx < 0) { sw += sx; dx -= sx; sx = 0; }
+    if (sy < 0) { sh += sy; dy -= sy; sy = 0; }
+    if (sx + sw > src_w) sw = src_w - sx;
+    if (sy + sh > src_h) sh = src_h - sy;
+    if (sw <= 0 || sh <= 0) return;
+
+    // Clip to destination bounds
+    if (dx < 0) { sx += -dx; sw += dx; dx = 0; }
+    if (dy < 0) { sy += -dy; sh += dy; dy = 0; }
+    if (dx + sw > dst_w) sw = dst_w - dx;
+    if (dy + sh > dst_h) sh = dst_h - dy;
+    if (sw <= 0 || sh <= 0) return;
+
+    bool use_key = (key_r >= 0 && key_g >= 0 && key_b >= 0);
+
+    for (int y = 0; y < sh; y++) {
+        const uint8_t* src_row = src + ((sy + y) * src_w + sx) * 3;
+        uint8_t* dst_row = dst + ((dy + y) * dst_w + dx) * 3;
+
+        if (!use_key) {
+            memcpy(dst_row, src_row, (size_t)sw * 3);
+        } else {
+            for (int x = 0; x < sw; x++) {
+                uint8_t r = src_row[x * 3 + 0];
+                uint8_t g = src_row[x * 3 + 1];
+                uint8_t b = src_row[x * 3 + 2];
+                if (r != (uint8_t)key_r || g != (uint8_t)key_g || b != (uint8_t)key_b) {
+                    dst_row[x * 3 + 0] = r;
+                    dst_row[x * 3 + 1] = g;
+                    dst_row[x * 3 + 2] = b;
+                }
+            }
+        }
+    }
+}
+
+void td_blit_sprite(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+                    const uint8_t* src, intptr_t src_w, intptr_t src_h,
+                    intptr_t dx, intptr_t dy,
+                    intptr_t key_r, intptr_t key_g, intptr_t key_b) {
+    td_blit_subimage(dst, dst_w, dst_h, src, src_w, src_h, dx, dy, 0, 0, src_w, src_h, key_r, key_g, key_b);
+}
+
+void td_blit_subimage_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+                           const uint8_t* src, intptr_t src_w, intptr_t src_h,
+                           intptr_t dx, intptr_t dy,
+                           intptr_t sx, intptr_t sy, intptr_t sw, intptr_t sh) {
+    if (!dst || !src || sw <= 0 || sh <= 0) return;
+
+    // Clip source rect to src bounds
+    if (sx < 0) { sw += sx; dx -= sx; sx = 0; }
+    if (sy < 0) { sh += sy; dy -= sy; sy = 0; }
+    if (sx + sw > src_w) sw = src_w - sx;
+    if (sy + sh > src_h) sh = src_h - sy;
+    if (sw <= 0 || sh <= 0) return;
+
+    // Clip to destination bounds
+    if (dx < 0) { sx += -dx; sw += dx; dx = 0; }
+    if (dy < 0) { sy += -dy; sh += dy; dy = 0; }
+    if (dx + sw > dst_w) sw = dst_w - dx;
+    if (dy + sh > dst_h) sh = dst_h - dy;
+    if (sw <= 0 || sh <= 0) return;
+
+    for (int y = 0; y < sh; y++) {
+        const uint8_t* src_row = src + ((sy + y) * src_w + sx) * 4;
+        uint8_t* dst_row = dst + ((dy + y) * dst_w + dx) * 3;
+
+        for (int x = 0; x < sw; x++) {
+            uint8_t a = src_row[x * 4 + 3];
+            if (a == 0) continue;
+            if (a == 255) {
+                dst_row[x * 3 + 0] = src_row[x * 4 + 0];
+                dst_row[x * 3 + 1] = src_row[x * 4 + 1];
+                dst_row[x * 3 + 2] = src_row[x * 4 + 2];
+            } else {
+                uint32_t inv_a = 255 - a;
+                dst_row[x * 3 + 0] = (uint8_t)((src_row[x * 4 + 0] * a + dst_row[x * 3 + 0] * inv_a) / 255);
+                dst_row[x * 3 + 1] = (uint8_t)((src_row[x * 4 + 1] * a + dst_row[x * 3 + 1] * inv_a) / 255);
+                dst_row[x * 3 + 2] = (uint8_t)((src_row[x * 4 + 2] * a + dst_row[x * 3 + 2] * inv_a) / 255);
+            }
+        }
+    }
+}
+
+void td_blit_sprite_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+                         const uint8_t* src, intptr_t src_w, intptr_t src_h,
+                         intptr_t dx, intptr_t dy) {
+    td_blit_subimage_rgba(dst, dst_w, dst_h, src, src_w, src_h, dx, dy, 0, 0, src_w, src_h);
 }
 
 #endif //TINY_DRAW_IMPLEMENTATION

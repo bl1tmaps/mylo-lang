@@ -32,6 +32,7 @@ mod PW {
     KEY_D: i32         = 68
     KEY_S: i32         = 83
     KEY_W: i32         = 87
+    KEY_R: i32         = 82
 
     KEY_LEFT: i32      = 256
     KEY_RIGHT: i32     = 257
@@ -44,6 +45,18 @@ mod PW {
     KEY_RCTRL: i32     = 263
     KEY_LALT: i32      = 264
     KEY_RALT: i32      = 265
+    KEY_F1: i32        = 274
+    KEY_F2: i32        = 275
+    KEY_F3: i32        = 276
+    KEY_F4: i32        = 277
+    KEY_F5: i32        = 278
+    KEY_F6: i32        = 279
+    KEY_F7: i32        = 280
+    KEY_F8: i32        = 281
+    KEY_F9: i32        = 282
+    KEY_F10: i32       = 283
+    KEY_F11: i32       = 284
+    KEY_F12: i32       = 285
 
     // Native C Function Prototypes (resolved dynamically or statically)
     cfn pw_create_window_id(width: i32, height: i32, title: str, resizable: bool) -> i32
@@ -68,6 +81,17 @@ mod PW {
 
     // TinyGlyph Bindings
     cfn draw_string_rgb(buffer: u8[], width: i32, height: i32, text: str, x: i32, y: i32, size: i32, r: u8, g: u8, b: u8)
+
+    // Fast Blitting Bindings
+    cfn td_blit_sprite(dst: u8[], dst_w: i32, dst_h: i32, src: u8[], src_w: i32, src_h: i32, dx: i32, dy: i32, key_r: i32, key_g: i32, key_b: i32)
+    cfn td_blit_subimage(dst: u8[], dst_w: i32, dst_h: i32, src: u8[], src_w: i32, src_h: i32, dx: i32, dy: i32, sx: i32, sy: i32, sw: i32, sh: i32, key_r: i32, key_g: i32, key_b: i32)
+    cfn td_blit_sprite_rgba(dst: u8[], dst_w: i32, dst_h: i32, src: u8[], src_w: i32, src_h: i32, dx: i32, dy: i32)
+    cfn td_blit_subimage_rgba(dst: u8[], dst_w: i32, dst_h: i32, src: u8[], src_w: i32, src_h: i32, dx: i32, dy: i32, sx: i32, sy: i32, sw: i32, sh: i32)
+
+    // Image Loader Bindings
+    cfn pw_load_image_info(filename: str, out_info: i32[]) -> bool
+    cfn pw_load_image_pixels_rgba(filename: str, out_buffer: u8[]) -> bool
+    cfn pw_load_image_pixels_rgb(filename: str, out_buffer: u8[]) -> bool
 
     // Friendly Wrapper Functions
     fn create_window(width: i32, height: i32, title: str, resizable: bool) -> i32 {
@@ -118,6 +142,59 @@ mod PW {
 
     fn draw_text(buffer: u8[], width: i32, height: i32, text: str, x: i32, y: i32, size: i32, r: u8, g: u8, b: u8) {
         draw_string_rgb(buffer, width, height, text, x, y, size, r, g, b)
+    }
+
+    fn blit_sprite(dst: u8[], dst_w: i32, dst_h: i32, src: u8[], src_w: i32, src_h: i32, dx: i32, dy: i32, key_r: i32, key_g: i32, key_b: i32) {
+        td_blit_sprite(dst, dst_w, dst_h, src, src_w, src_h, dx, dy, key_r, key_g, key_b)
+    }
+
+    fn blit_subimage(dst: u8[], dst_w: i32, dst_h: i32, src: u8[], src_w: i32, src_h: i32, dx: i32, dy: i32, sx: i32, sy: i32, sw: i32, sh: i32, key_r: i32, key_g: i32, key_b: i32) {
+        td_blit_subimage(dst, dst_w, dst_h, src, src_w, src_h, dx, dy, sx, sy, sw, sh, key_r, key_g, key_b)
+    }
+
+    fn blit_sprite_rgba(dst: u8[], dst_w: i32, dst_h: i32, src: u8[], src_w: i32, src_h: i32, dx: i32, dy: i32) {
+        td_blit_sprite_rgba(dst, dst_w, dst_h, src, src_w, src_h, dx, dy)
+    }
+
+    fn blit_subimage_rgba(dst: u8[], dst_w: i32, dst_h: i32, src: u8[], src_w: i32, src_h: i32, dx: i32, dy: i32, sx: i32, sy: i32, sw: i32, sh: i32) {
+        td_blit_subimage_rgba(dst, dst_w, dst_h, src, src_w, src_h, dx, dy, sx, sy, sw, sh)
+    }
+
+    struct Image {
+        width: i32,
+        height: i32,
+        channels: i32,
+        pixels: u8[]
+    }
+
+    fn load_image_rgba(filename: str) -> Image {
+        info: i32[] = [0, 0, 0]
+        ok: bool = pw_load_image_info(filename, info)
+        if (ok == false) {
+            empty: u8[] = []
+            ret { width = 0, height = 0, channels = 0, pixels = empty }
+        }
+        w: i32 = info[0]
+        h: i32 = info[1]
+        total: i32 = w * h * 4
+        buf: u8[] = [0...total]
+        pw_load_image_pixels_rgba(filename, buf)
+        ret { width = w, height = h, channels = 4, pixels = buf }
+    }
+
+    fn load_image_rgb(filename: str) -> Image {
+        info: i32[] = [0, 0, 0]
+        ok: bool = pw_load_image_info(filename, info)
+        if (ok == false) {
+            empty: u8[] = []
+            ret { width = 0, height = 0, channels = 0, pixels = empty }
+        }
+        w: i32 = info[0]
+        h: i32 = info[1]
+        total: i32 = w * h * 3
+        buf: u8[] = [0...total]
+        pw_load_image_pixels_rgb(filename, buf)
+        ret { width = w, height = h, channels = 3, pixels = buf }
     }
 
     fn get_mouse_x(win: i32) -> f32 {

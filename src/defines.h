@@ -17,7 +17,7 @@
 // Compilation Limits
 #define MAX_IDENTIFIER 256
 #define MAX_STRUCTS 64
-#define MAX_FIELDS 16
+#define MAX_FIELDS 64
 #define MAX_NATIVES 128
 #define MAX_FFI_ARGS 16
 #define MAX_C_BLOCK_SIZE 1024

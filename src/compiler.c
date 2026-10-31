@@ -106,6 +106,9 @@ int search_path_count = 0;
 char c_headers[MAX_C_HEADERS][MAX_STRING_LENGTH];
 int c_header_count = 0;
 
+static char imported_files[1024][MAX_STRING_LENGTH];
+static int imported_file_count = 0;
+
 typedef struct {
     int break_patches[MAX_JUMPS_PER_LOOP];
     int break_count;
@@ -979,6 +982,7 @@ bool parse_namespaced_id(char *out_name) {
 }
 
 void compiler_reset() {
+    imported_file_count = 0;
     global_count = 0;
     max_global_count = 0;
     compiler_region_count = 0;
@@ -1932,7 +1936,24 @@ static void parse_import() {
         }
 
         if (!c) error("Cannot find native import '%s'", filename);
+        char canon[2048];
+        if (realpath(resolved_path, canon)) {
+            strcpy(resolved_path, canon);
+        }
+        for (int i = 0; i < imported_file_count; i++) {
+            if (strcmp(imported_files[i], resolved_path) == 0 || strcmp(imported_files[i], filename) == 0) {
+                free(c);
+                return;
+            }
+        }
+        if (imported_file_count < 1024) {
+            strcpy(imported_files[imported_file_count++], resolved_path);
+        }
+        char old_dir[1024];
+        strcpy(old_dir, current_file_dir);
+        get_executable_dir(current_file_dir, sizeof(current_file_dir), resolved_path);
         parse_internal(c, true);
+        strcpy(current_file_dir, old_dir);
 
         if (!MyloConfig.build_mode) {
             int added_natives = ffi_count - start_ffi_index;
@@ -2076,11 +2097,15 @@ static void parse_import() {
 
         char *c = read_file(f);
 
+        char resolved_path[2048];
+        strcpy(resolved_path, f);
+
         // 1. Check relative to current_file_dir (e.g. if script is in ../modules/pixel_window/)
         if (!c && strcmp(current_file_dir, ".") != 0) {
             char tmp[2048];
             snprintf(tmp, sizeof(tmp), "%s/%s", current_file_dir, f);
             c = read_file(tmp);
+            if (c) strcpy(resolved_path, tmp);
         }
 
         // 2. Check module_path entries
@@ -2089,7 +2114,7 @@ static void parse_import() {
                 char tmp[MAX_STRING_LENGTH];
                 sprintf(tmp, "%s/%s", search_paths[i], f);
                 c = read_file(tmp);
-                if (c) break;
+                if (c) { strcpy(resolved_path, tmp); break; }
             }
         }
 
@@ -2098,7 +2123,10 @@ static void parse_import() {
             char modules_path[2048];
             snprintf(modules_path, sizeof(modules_path), "%s/modules", mylo_exe_dir);
             char* found_path = find_file_recursive(modules_path, f);
-            if (found_path) c = read_file(found_path);
+            if (found_path) {
+                c = read_file(found_path);
+                strcpy(resolved_path, found_path);
+            }
         }
 
         // 4. Recursive search in `<exe_dir>/../modules/` (e.g. when executing from build/)
@@ -2106,10 +2134,32 @@ static void parse_import() {
             char modules_path[2048];
             snprintf(modules_path, sizeof(modules_path), "%s/../modules", mylo_exe_dir);
             char* found_path = find_file_recursive(modules_path, f);
-            if (found_path) c = read_file(found_path);
+            if (found_path) {
+                c = read_file(found_path);
+                strcpy(resolved_path, found_path);
+            }
         }
 
-        if (c) parse_internal(c, true);
+        if (c) {
+            char canon[2048];
+            if (realpath(resolved_path, canon)) {
+                strcpy(resolved_path, canon);
+            }
+            for (int i = 0; i < imported_file_count; i++) {
+                if (strcmp(imported_files[i], resolved_path) == 0 || strcmp(imported_files[i], f) == 0) {
+                    free(c);
+                    return;
+                }
+            }
+            if (imported_file_count < 1024) {
+                strcpy(imported_files[imported_file_count++], resolved_path);
+            }
+            char old_dir[1024];
+            strcpy(old_dir, current_file_dir);
+            get_executable_dir(current_file_dir, sizeof(current_file_dir), resolved_path);
+            parse_internal(c, true);
+            strcpy(current_file_dir, old_dir);
+        }
         else error("Cannot find import '%s'", f);
     }
 }
