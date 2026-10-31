@@ -1584,6 +1584,105 @@ inline TestOutput test_cfn_dynamic_resolution() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_region_block_execution() {
+    std::string src =
+    "x: i64 = 999\n"
+    "region myregion {\n"
+    "    v: i32 = 777\n"
+    "    arr: i32[] = [10, 20, 30]\n"
+    "    print(v)\n"
+    "    print(arr[1])\n"
+    "}\n"
+    "print(x)\n";
+    std::string expected = "777\n20\n999\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_anonymous_region_execution() {
+    std::string src =
+    "region {\n"
+    "    arr: i32[] = [1, 2, 3]\n"
+    "    print(arr[0])\n"
+    "    print(arr[2])\n"
+    "}\n"
+    "print(\"done\")\n";
+    std::string expected = "1\n3\ndone\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_nested_region_execution() {
+    std::string src =
+    "region outer {\n"
+    "    a: i32 = 100\n"
+    "    region inner {\n"
+    "        b: i32 = 200\n"
+    "        print(a + b)\n"
+    "    }\n"
+    "    print(a)\n"
+    "}\n";
+    std::string expected = "300\n100\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_region_scope_error() {
+    return run_error_test("region myreg {\n    v: i32 = 42\n}\nprint(v)\n");
+}
+
+inline TestOutput test_region_inside_function() {
+    std::string src =
+    "fn test_func() -> i32 {\n"
+    "    region temp_reg {\n"
+    "        v: i32 = 123\n"
+    "        ret v * 2\n"
+    "    }\n"
+    "}\n"
+    "print(test_func())\n";
+    std::string expected = "246\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_named_region_declaration_and_clear() {
+    std::string src =
+    "region foo\n"
+    "foo::x : i32 = 6555\n"
+    "print(foo::x)\n"
+    "clear foo\n";
+    std::string expected = "6555\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_named_region_array_allocation() {
+    std::string src =
+    "region foo\n"
+    "foo::arr : i32[] = [10, 20, 30]\n"
+    "print(foo::arr[0])\n"
+    "print(foo::arr[1])\n"
+    "clear(foo)\n";
+    std::string expected = "10\n20\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_named_region_access_after_clear_error() {
+    return run_error_test("region foo\nfoo::x : i32 = 6555\nclear foo\nprint(foo::x)\n");
+}
+
+inline TestOutput test_named_region_across_functions() {
+    std::string src =
+    "region foo\n"
+    "fn populate() {\n"
+    "    foo::data : i32[] = [42, 84]\n"
+    "}\n"
+    "fn print_data() {\n"
+    "    print(foo::data[0])\n"
+    "    print(foo::data[1])\n"
+    "}\n"
+    "populate()\n"
+    "print_data()\n"
+    "clear foo\n";
+    std::string expected = "42\n84\n";
+    return run_source_test(src, expected);
+}
+
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
     ADD_TEST("Test Print", test_hello_world);
@@ -1684,6 +1783,15 @@ inline void test_generate_list() {
     ADD_TEST("Test Num Type Removed Error", test_num_type_removed_error);
     ADD_TEST("Test Bracketed Range Array", test_bracketed_range_array);
     ADD_TEST("Test CFN Dynamic Resolution", test_cfn_dynamic_resolution);
+    ADD_TEST("Test Region Block Execution", test_region_block_execution);
+    ADD_TEST("Test Anonymous Region Execution", test_anonymous_region_execution);
+    ADD_TEST("Test Nested Region Execution", test_nested_region_execution);
+    ADD_TEST("Test Region Scope Error", test_region_scope_error);
+    ADD_TEST("Test Region Inside Function", test_region_inside_function);
+    ADD_TEST("Test Named Region Decl and Clear", test_named_region_declaration_and_clear);
+    ADD_TEST("Test Named Region Array Alloc", test_named_region_array_allocation);
+    ADD_TEST("Test Named Region Access After Clear Error", test_named_region_access_after_clear_error);
+    ADD_TEST("Test Named Region Across Functions", test_named_region_across_functions);
 
 
 }

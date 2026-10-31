@@ -55,6 +55,10 @@ typedef enum {
     OP_NEW_ARENA,
     OP_DEL_ARENA,
     OP_SET_CTX,
+    OP_NEW_ARENA_PUSH,
+    OP_PUSH_CTX,
+    OP_POP_CTX,
+    OP_FREE_ARENA,
     OP_MONITOR,
     OP_CAST,
     OP_CHECK_TYPE,
@@ -90,6 +94,8 @@ typedef struct {
 typedef struct {
     char name[MAX_IDENTIFIER];
     int addr;
+    int start_ip;
+    int end_ip;
 } VMSymbol;
 
 typedef struct {
