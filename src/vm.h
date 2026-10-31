@@ -200,6 +200,7 @@ int vm_find_function(VM* vm, const char* name);
 void vm_register_function(VM* vm, const char* name, int addr);
 void print_recursive(VM* vm, double val, int type, int depth, int max_elem);
 double vm_evacuate_object(VM* vm, double ptr_val, int target_head);
+int get_type_size(int heap_type);
 void enter_debugger(VM* vm);
 void print_raw(VM* vm, const char* str);
 

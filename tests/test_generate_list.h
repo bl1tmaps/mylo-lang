@@ -1070,6 +1070,99 @@ inline TestOutput test_for_list_str() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_filter_i32() {
+    std::string src = """"
+        "my_list : i32[] = [0...10]\n"
+        "fn bigger_than_5(x: i32) -> bool {\n"
+        "    ret x > 5\n"
+        "}\n"
+        "print(filter(my_list, \"bigger_than_5\"))\n"
+        "print(filter(\"bigger_than_5\", my_list))\n";
+    std::string expected = """"
+        "[6, 7, 8, 9, 10]\n"
+        "[6, 7, 8, 9, 10]\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_for_list_i32() {
+    std::string src = """"
+        "my_list : i32[] = [1...5]\n"
+        "fn double_val(x: i32) -> i32 {\n"
+        "    ret x * 2\n"
+        "}\n"
+        "print(for_list(my_list, \"double_val\"))\n"
+        "print(for_list(\"double_val\", my_list))\n";
+    std::string expected = """"
+        "[2, 4, 6, 8, 10]\n"
+        "[2, 4, 6, 8, 10]\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_filter_struct_array() {
+    std::string src = """"
+        "struct Item {\n"
+        "    id: i32,\n"
+        "    price: f64\n"
+        "}\n"
+        "fn is_expensive(item: Item) -> bool {\n"
+        "    ret item.price > 50.0\n"
+        "}\n"
+        "items: Item[] = [{id = 1, price = 19.99}, {id = 2, price = 89.5}, {id = 3, price = 120.0}]\n"
+        "res: Item[] = filter(items, \"is_expensive\")\n"
+        "print(len(res))\n"
+        "for (it: Item in res) {\n"
+        "    print(it.id)\n"
+        "}\n";
+    std::string expected = """"
+        "2\n"
+        "2\n"
+        "3\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_for_list_struct_array() {
+    std::string src = """"
+        "struct Item {\n"
+        "    id: i32,\n"
+        "    price: f64\n"
+        "}\n"
+        "fn get_id(item: Item) -> i32 {\n"
+        "    ret item.id\n"
+        "}\n"
+        "items: Item[] = [{id = 10, price = 5.0}, {id = 20, price = 15.0}]\n"
+        "ids: i32[] = for_list(items, \"get_id\")\n"
+        "print(ids)\n";
+    std::string expected = """"
+        "[10, 20]\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_filter_f64() {
+    std::string src = """"
+        "floats: f64[] = [1.2, 5.5, 3.1, 9.8]\n"
+        "fn above_four(x: f64) -> bool {\n"
+        "    ret x > 4.0\n"
+        "}\n"
+        "print(filter(floats, \"above_four\"))\n";
+    std::string expected = """"
+        "[5.5, 9.8]\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_param_filter_both_orders() {
+    std::string src = """"
+        "my_list: i32[] = [1, 5, 10, 15, 20]\n"
+        "fn greater_than(x: i32, threshold: i32) -> bool {\n"
+        "    ret x > threshold\n"
+        "}\n"
+        "print(param_filter(my_list, \"greater_than\", 9))\n"
+        "print(param_filter(\"greater_than\", my_list, 9))\n";
+    std::string expected = """"
+        "[10, 15, 20]\n"
+        "[10, 15, 20]\n";
+    return run_source_test(src, expected);
+}
+
 inline TestOutput test_min() {
     std::string src = """"
         "print(min(0.4, 0.2))\n";
@@ -1808,6 +1901,12 @@ inline void test_generate_list() {
     ADD_TEST("Test Named Region Access After Clear Error", test_named_region_access_after_clear_error);
     ADD_TEST("Test Named Region Across Functions", test_named_region_across_functions);
     ADD_TEST("Test Struct Method Statement", test_struct_method_statement);
+    ADD_TEST("Test Filter i32", test_filter_i32);
+    ADD_TEST("Test For-List i32", test_for_list_i32);
+    ADD_TEST("Test Filter Struct Array", test_filter_struct_array);
+    ADD_TEST("Test For-List Struct Array", test_for_list_struct_array);
+    ADD_TEST("Test Filter f64", test_filter_f64);
+    ADD_TEST("Test Param-Filter Both Orders", test_param_filter_both_orders);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H
