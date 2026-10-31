@@ -2383,7 +2383,29 @@ static void parse_id_statement(Token start_token, char *name) {
                 if (type_id < 0) error("Accessing member '%s' of untyped/primitive var.", f);
 
                 int offset = find_field(type_id, f);
-                if (offset == -1) error("Struct '%s' has no field '%s'", struct_defs[type_id].name, f);
+                if (offset == -1) {
+                    int method_idx = find_method(type_id, f);
+                    if (method_idx != -1) {
+                        if (curr.type != TK_LPAREN) error("Method '%s' must be called", f);
+                        match(TK_LPAREN);
+                        int arg_count = 1; // 'self' is implicitly pushed
+                        if (curr.type != TK_RPAREN) {
+                            expression(); arg_count++;
+                            while (curr.type == TK_COMMA) { match(TK_COMMA); expression(); arg_count++; }
+                        }
+                        match(TK_RPAREN);
+                        char full_name[MAX_IDENTIFIER * 2];
+                        sprintf(full_name, "%s_%s", struct_defs[type_id].name, f);
+                        int faddr = find_func(full_name);
+                        if (faddr == -1) error("Undefined method '%s'", full_name);
+                        emit(OP_CALL);
+                        emit(faddr);
+                        emit(arg_count);
+                        emit(OP_POP);
+                        break;
+                    }
+                    error("Struct '%s' has no field or method '%s'", struct_defs[type_id].name, f);
+                }
 
                 int field_type = struct_defs[type_id].field_types[offset];
                 if (curr.type == TK_EQ_ASSIGN) {

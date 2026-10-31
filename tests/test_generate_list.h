@@ -1683,6 +1683,21 @@ inline TestOutput test_named_region_across_functions() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_struct_method_statement() {
+    std::string src =
+    "struct Counter {\n"
+    "    val: i32\n"
+    "    fn increment(self) {\n"
+    "        self.val = self.val + 1\n"
+    "    }\n"
+    "}\n"
+    "c: Counter = {val=10}\n"
+    "c.increment()\n"
+    "print(c.val)\n";
+    std::string expected = "11\n";
+    return run_source_test(src, expected);
+}
+
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
     ADD_TEST("Test Print", test_hello_world);
@@ -1792,8 +1807,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Named Region Array Alloc", test_named_region_array_allocation);
     ADD_TEST("Test Named Region Access After Clear Error", test_named_region_access_after_clear_error);
     ADD_TEST("Test Named Region Across Functions", test_named_region_across_functions);
-
-
+    ADD_TEST("Test Struct Method Statement", test_struct_method_statement);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

@@ -1,0 +1,185 @@
+// =============================================================================
+// pong.mylo - A Complete 2-Player Pong Game in Mylo
+// =============================================================================
+
+module_path("modules/pixel_window/")
+module_path("../modules/pixel_window/")
+import native "pixel_window.mylo"
+
+// --- Screen Settings ---
+screen_w: i32 = 640
+screen_h: i32 = 480
+
+// --- Entity Definitions ---
+struct Paddle {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    speed: i32,
+
+    fn move_up(self) {
+        self.y = self.y - self.speed
+        if (self.y < 12) {
+            self.y = 12
+        }
+    }
+
+    fn move_down(self, max_y: i32) {
+        self.y = self.y + self.speed
+        if (self.y + self.h > max_y - 12) {
+            self.y = max_y - 12 - self.h
+        }
+    }
+}
+
+struct Ball {
+    x: i32,
+    y: i32,
+    vx: i32,
+    vy: i32,
+    radius: i32,
+
+    fn reset(self, start_x: i32, start_y: i32, dir_x: i32) {
+        self.x = start_x
+        self.y = start_y
+        self.vx = dir_x
+        self.vy = 3
+    }
+}
+
+// --- Initialize Game Objects ---
+p1: Paddle = {x=25, y=200, w=14, h=80, speed=6}
+p2: Paddle = {x=screen_w - 39, y=200, w=14, h=80, speed=6}
+ball: Ball = {x=screen_w / 2, y=screen_h / 2, vx=4, vy=3, radius=6}
+
+score_p1: i32 = 0
+score_p2: i32 = 0
+
+// --- Create Window and Frame Buffer ---
+win: i32 = PW::create_window(screen_w, screen_h, "Mylo Pong", false)
+buffer: u8[] = PW::create_buffer(screen_w, screen_h)
+
+// --- Game Loop ---
+forever {
+    // 1. Process OS window events
+    if (PW::process_events(win) == false) {
+        break
+    }
+
+    // 2. Exit on ESCAPE key
+    if (PW::is_key_pressed(win, PW::KEY_ESCAPE)) {
+        break
+    }
+
+    // 3. User Input
+    // Player 1: W (Up) / S (Down)
+    if (PW::is_key_down(win, PW::KEY_W)) {
+        p1.move_up()
+    }
+    if (PW::is_key_down(win, PW::KEY_S)) {
+        p1.move_down(screen_h)
+    }
+
+    // Player 2: Arrow Up / Arrow Down
+    if (PW::is_key_down(win, PW::KEY_UP)) {
+        p2.move_up()
+    }
+    if (PW::is_key_down(win, PW::KEY_DOWN)) {
+        p2.move_down(screen_h)
+    }
+
+    // 4. Ball Physics
+    ball.x = ball.x + ball.vx
+    ball.y = ball.y + ball.vy
+
+    // Wall Bounces (Top and Bottom)
+    if (ball.y - ball.radius <= 10) {
+        ball.y = 10 + ball.radius
+        ball.vy = 0 - ball.vy
+    }
+    if (ball.y + ball.radius >= screen_h - 10) {
+        ball.y = screen_h - 10 - ball.radius
+        ball.vy = 0 - ball.vy
+    }
+
+    // Paddle Collisions (AABB Checks)
+    // Left Paddle (P1)
+    if (ball.vx < 0) {
+        if (ball.x - ball.radius <= p1.x + p1.w) {
+            if (ball.x + ball.radius >= p1.x) {
+                if (ball.y >= p1.y) {
+                    if (ball.y <= p1.y + p1.h) {
+                        ball.vx = 0 - ball.vx
+                        ball.x = p1.x + p1.w + ball.radius
+                    }
+                }
+            }
+        }
+    }
+
+    // Right Paddle (P2)
+    if (ball.vx > 0) {
+        if (ball.x + ball.radius >= p2.x) {
+            if (ball.x - ball.radius <= p2.x + p2.w) {
+                if (ball.y >= p2.y) {
+                    if (ball.y <= p2.y + p2.h) {
+                        ball.vx = 0 - ball.vx
+                        ball.x = p2.x - ball.radius
+                    }
+                }
+            }
+        }
+    }
+
+    // Scoring & Reset
+    if (ball.x < 0) {
+        score_p2 = score_p2 + 1
+        ball.reset(screen_w / 2, screen_h / 2, 4)
+    }
+    if (ball.x > screen_w) {
+        score_p1 = score_p1 + 1
+        ball.reset(screen_w / 2, screen_h / 2, -4)
+    }
+
+    // 5. Render Scene
+    // Clear screen to deep retro blue
+    PW::clear_buffer(buffer, screen_w, screen_h, 15, 18, 28)
+
+    // Court Borders
+    PW::draw_line(buffer, screen_w, screen_h, 10, 10, screen_w - 10, 10, 2, 60, 70, 90)
+    PW::draw_line(buffer, screen_w, screen_h, 10, screen_h - 10, screen_w - 10, screen_h - 10, 2, 60, 70, 90)
+
+    // Center Net Line
+    net_y: i32 = 14
+    for (net_y < screen_h - 14) {
+        PW::draw_rect(buffer, screen_w, screen_h, (screen_w / 2) - 1, net_y, 2, 10, 1, true, 80, 90, 110)
+        net_y = net_y + 18
+    }
+
+    // Use a Scoped Region for Frame Motion Trail
+    region {
+        trail_x: i32[] = [ball.x - ball.vx, ball.x - (ball.vx * 2)]
+        trail_y: i32[] = [ball.y - ball.vy, ball.y - (ball.vy * 2)]
+        PW::draw_circle(buffer, screen_w, screen_h, trail_x[0], trail_y[0], ball.radius - 1, 1, true, 220, 180, 60)
+        PW::draw_circle(buffer, screen_w, screen_h, trail_x[1], trail_y[1], ball.radius - 3, 1, true, 160, 120, 30)
+    }
+
+    // Draw Paddles
+    PW::draw_rect(buffer, screen_w, screen_h, p1.x, p1.y, p1.w, p1.h, 1, true, 80, 200, 255)
+    PW::draw_rect(buffer, screen_w, screen_h, p2.x, p2.y, p2.w, p2.h, 1, true, 255, 100, 100)
+
+    // Draw Ball
+    PW::draw_circle(buffer, screen_w, screen_h, ball.x, ball.y, ball.radius, 1, true, 255, 230, 80)
+
+    // Draw Scores
+    PW::draw_text(buffer, screen_w, screen_h, f"{score_p1}", (screen_w / 2) - 60, 25, 24, 255, 255, 255)
+    PW::draw_text(buffer, screen_w, screen_h, f"{score_p2}", (screen_w / 2) + 40, 25, 24, 255, 255, 255)
+
+    // 6. Blit Buffer to Screen
+    PW::update_window(win, buffer)
+}
+
+// Clean up
+PW::destroy_window(win)
+print("Thanks for playing Mylo Pong!")
