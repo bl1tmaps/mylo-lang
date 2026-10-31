@@ -216,7 +216,7 @@ void free_arena(VM* vm, int id);
 #define MYLO_RETRIEVE_FROM_VM(vm, id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)
 #define MYLO_REGISTER_IN_VM(vm, ptr, type_name) vm_store_ptr(vm, (void*)(ptr), type_name)
 
-bool load_self_contained(VM* vm, const char* exe_path);
+
 
 // DLL Loading functions
 // Loads a shared library (.dll / .so) at the given path

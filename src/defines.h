@@ -122,6 +122,7 @@ typedef struct {
     long dependency_size;
     long symbol_size;
     long function_size; // func table size
+    long ffi_size;      // Size of FFI blocks table
     char magic[9];       // "MYLO_EXE\0"
 } StandaloneFooter;
 

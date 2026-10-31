@@ -17,6 +17,7 @@
 // Mylo includes
 extern "C" {
     #include "../src/vm.h"
+    #include "../src/compiler.h"
     void compiler_reset();
     // declarations from compiler.c
     void parse(VM* vm, char* src);
@@ -1791,6 +1792,65 @@ inline TestOutput test_struct_method_statement() {
     return run_source_test(src, expected);
 }
 
+inline TestOutput test_standalone_bundle_cfn() {
+    compiler_reset();
+    VM compile_vm = {0};
+    vm_init(&compile_vm);
+
+    std::string src =
+        "cfn atoi(x: str) -> f32\n"
+        "val: f32 = atoi(\"42\")\n"
+        "print(val)\n";
+
+    parse(&compile_vm, const_cast<char*>(src.c_str()));
+
+    // Create a dummy host file
+    const char* dummy_host = "test_dummy_host.bin";
+    FILE* f_host = fopen(dummy_host, "wb");
+    if (!f_host) {
+        vm_cleanup(&compile_vm);
+        return {false, "Failed to create dummy host file"};
+    }
+    const char dummy_data[] = "MYLO_TEST_DUMMY_HOST";
+    fwrite(dummy_data, 1, sizeof(dummy_data), f_host);
+    fclose(f_host);
+
+    const char* bundle_out = "test_bundle.bin";
+    create_standalone_executable(&compile_vm, bundle_out, dummy_host);
+
+    // Now test load_self_contained into a fresh VM instance
+    VM bundle_vm = {0};
+    vm_init(&bundle_vm);
+
+    bool loaded = load_self_contained(&bundle_vm, bundle_out);
+    if (!loaded) {
+        remove(dummy_host);
+        remove(bundle_out);
+        vm_cleanup(&compile_vm);
+        vm_cleanup(&bundle_vm);
+        return {false, "load_self_contained failed to parse bundle"};
+    }
+
+    MyloConfig.print_to_memory = true;
+    run_vm(&bundle_vm, false);
+    MyloConfig.print_to_memory = false;
+
+    TestOutput out;
+    std::string expected = "42\n";
+    if (strcmp(bundle_vm.output_char_buffer, expected.c_str()) == 0) {
+        out.result = true;
+    } else {
+        out.result = false;
+        out.result_string = "Expected '" + expected + "', got '" + std::string(bundle_vm.output_char_buffer) + "'";
+    }
+
+    remove(dummy_host);
+    remove(bundle_out);
+    vm_cleanup(&compile_vm);
+    vm_cleanup(&bundle_vm);
+    return out;
+}
+
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
     ADD_TEST("Test Print", test_hello_world);
@@ -1907,6 +1967,7 @@ inline void test_generate_list() {
     ADD_TEST("Test For-List Struct Array", test_for_list_struct_array);
     ADD_TEST("Test Filter f64", test_filter_f64);
     ADD_TEST("Test Param-Filter Both Orders", test_param_filter_both_orders);
+    ADD_TEST("Test Standalone Bundle CFN", test_standalone_bundle_cfn);
 }
 
 #endif //MYLO_TEST_GENERATE_LIST_H

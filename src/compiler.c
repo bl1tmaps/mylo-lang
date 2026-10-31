@@ -3719,6 +3719,7 @@ void create_standalone_executable(VM* vm, const char* output_filename, const cha
     fwrite(vm->dependencies, sizeof(Dependency), vm->dependency_count, out);
     fwrite(vm->global_symbols, sizeof(VMSymbol), vm->global_symbol_count, out);
     fwrite(vm->functions, sizeof(VMFunction), vm->function_count, out);
+    fwrite(ffi_blocks, sizeof(FFIBlock), ffi_count, out);
     // 5. Append Footer (The Metadata)
     StandaloneFooter footer;
     footer.dependency_size = vm->dependency_count * sizeof(Dependency);
@@ -3728,6 +3729,7 @@ void create_standalone_executable(VM* vm, const char* output_filename, const cha
     footer.string_size = vm->str_count * MAX_STRING_LENGTH;
     footer.symbol_size = vm->global_symbol_count * sizeof(VMSymbol);
     footer.function_size = vm->function_count * sizeof(VMFunction);
+    footer.ffi_size = ffi_count * sizeof(FFIBlock);
     fwrite(&footer, sizeof(StandaloneFooter), 1, out);
 
     // Cleanup
@@ -3742,4 +3744,134 @@ void create_standalone_executable(VM* vm, const char* output_filename, const cha
 #endif
 
     printf("Successfully created standalone executable: %s\n", output_filename);
+}
+
+typedef void (*StandaloneBindFunc)(VM *, int, MyloAPI *);
+
+bool load_self_contained(VM* vm, const char* exe_path) {
+    FILE* f = fopen(exe_path, "rb");
+    if (!f) return false;
+
+    // Check Footer
+    fseek(f, -((long)sizeof(StandaloneFooter)), SEEK_END);
+    StandaloneFooter footer;
+    if (fread(&footer, sizeof(StandaloneFooter), 1, f) != 1) { fclose(f); return false; }
+    if (strcmp(footer.magic, MYLO_MAGIC) != 0) { fclose(f); return false; }
+
+    long total_payload_size = footer.bytecode_size + footer.const_size + footer.string_size + footer.dependency_size + footer.symbol_size + footer.function_size + footer.ffi_size;
+    fseek(f, -(total_payload_size + (long)sizeof(StandaloneFooter)), SEEK_END);
+
+    // 1. Read Bytecode
+    vm->code_size = footer.bytecode_size / sizeof(int);
+    fread(vm->bytecode, sizeof(int), vm->code_size, f);
+
+    // 2. Read Constants
+    vm->const_count = footer.const_size / sizeof(double);
+    fread(vm->constants, sizeof(double), vm->const_count, f);
+
+    // 3. Read Strings
+    vm->str_count = footer.string_size / MAX_STRING_LENGTH;
+    fread(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, f);
+
+    // 4. Read Dependencies (Store in temporary memory so we can read symbols next)
+    int dep_count = footer.dependency_size / sizeof(Dependency);
+    Dependency* deps = NULL;
+    if (dep_count > 0) {
+        deps = malloc(footer.dependency_size);
+        fread(deps, sizeof(Dependency), dep_count, f);
+    }
+
+    // 5. Read Symbols sequentially!
+    int symbol_count = footer.symbol_size / sizeof(VMSymbol);
+    vm->global_symbol_count = symbol_count;
+    vm->global_symbols = malloc(footer.symbol_size);
+    fread(vm->global_symbols, sizeof(VMSymbol), symbol_count, f);
+
+    // 5b. Read Functions sequentially!
+    int func_count = footer.function_size / sizeof(VMFunction);
+    vm->function_count = func_count;
+    fread(vm->functions, sizeof(VMFunction), func_count, f);
+
+    // 5c. Read FFI Blocks sequentially!
+    int ffi_block_count = (int)(footer.ffi_size / sizeof(FFIBlock));
+    if (ffi_block_count > 0) {
+        fread(ffi_blocks, sizeof(FFIBlock), ffi_block_count, f);
+        ffi_count = ffi_block_count;
+        int std_count = 0;
+        while (std_library[std_count].name != NULL) std_count++;
+        for (int i = 0; i < ffi_count; i++) {
+            if (ffi_blocks[i].is_cfn) {
+                void *sym = get_symbol(NULL, ffi_blocks[i].c_symbol_name);
+                if (!sym) sym = get_symbol(NULL, ffi_blocks[i].func_name);
+                ffi_blocks[i].native_symbol = sym;
+                ffi_blocks[i].is_bound = (sym != NULL);
+                vm->natives[std_count + i] = dynamic_cfn_invoker;
+            }
+        }
+    }
+
+    // 6. Bind Dependencies
+    if (dep_count > 0) {
+        // Prepare API for binding
+        MyloAPI api;
+        api.push = vm_push;
+        api.pop = vm_pop;
+        api.make_string = make_string;
+        api.heap_alloc = heap_alloc;
+        api.resolve_ptr = vm_resolve_ptr;
+        api.store_copy = vm_store_copy;
+        api.store_ptr = vm_store_ptr;
+        api.get_ref = vm_get_ref;
+        api.free_ref = vm_free_ref;
+        api.natives_array = vm->natives;
+        api.string_pool = vm->string_pool;
+        api.find_function = vm_find_function;
+        api.exec_vm_from = run_vm_from;
+
+        for (int i = 0; i < dep_count; i++) {
+            printf("Loading ... %s\n", deps[i].name);
+            void* lib = load_library(deps[i].name);
+
+            if (!lib) {
+                char exe_path_buf[1024];
+                const char* clean_name = deps[i].name;
+
+                // Strip the "./" prefix injected by get_lib_name on Unix systems
+                if (strncmp(clean_name, "./", 2) == 0) clean_name += 2;
+
+                snprintf(exe_path_buf, sizeof(exe_path_buf), "%s/%s", mylo_exe_dir, clean_name);
+                lib = load_library(exe_path_buf);
+            }
+            
+            if (!lib) {
+                char *pathvar;
+                pathvar = getenv("MYLO_LIBS");
+                printf("MYLO_LIBS=%s", pathvar ? pathvar : "(null)");
+                if (pathvar && (strlen(deps[i].name) > 3)) {
+                    char pathbind[1024] = "";
+                    strcat(pathbind, pathvar);
+                    strcat(pathbind, deps[i].name + 2);
+                    printf("Attempting to load from MYLO_LIBS (%s)\n", pathvar); 
+                    lib = load_library(pathbind);
+                }
+            }
+
+            if (!lib) {
+                printf("Runtime Error: Could not load dependency '%s'\n", deps[i].name);
+                exit(1);
+            }
+
+            StandaloneBindFunc binder = (StandaloneBindFunc)get_symbol(lib, "mylo_bind_lib");
+            if (!binder) {
+                printf("Runtime Error: Library '%s' is not a valid Mylo module.\n", deps[i].name);
+                exit(1);
+            }
+
+            binder(vm, deps[i].start_index, &api);
+        }
+        free(deps);
+    }
+
+    fclose(f);
+    return true;
 }
