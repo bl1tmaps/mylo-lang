@@ -10,8 +10,9 @@ It is fast to write, fast to run, and can run anywhere.
 - [Mylo Reference](#mylo-reference)
     * [Language Basics](#language-basics)
     * [Technical Intro (for nerds)](#technical-intro-for-nerds)
-    * [Variables](#variables)
-        + [Numbers and Strings](#numbers-and-strings)
+    * [Variables & Scoping](#variables)
+        + [Declaration Syntax](#declaration-syntax)
+        + [Strict Typing Rules](#strict-typing-rules)
         + [Monitor](#monitor)
     * [Types](#types)
         + [Primitives](#primitive-types)
@@ -38,6 +39,10 @@ It is fast to write, fast to run, and can run anywhere.
     * [Functions](#functions)
         - [Passing own types](#passing-own-types)
     * [Scope & Modules](#scope-modules)
+    * [Memory Management - Arenas & Regions](#memory-management)
+        + [Lexical Scoped Region Blocks](#lexical-scoped-region-blocks)
+        + [Persistent Named Regions & Explicit Lifecycles](#persistent-named-regions--explicit-lifecycles)
+        + [Memory Reclamation & Compile-Time Safety](#memory-reclamation--compile-time-safety)
     * [Import & Module Path](#import)
     * [C Interoperability Foreign Function Interface (FFI)](#c-interoperability-foreign-function-interface-ffi)
         + [Source example.mylo](#source-examplemylo)
@@ -98,36 +103,49 @@ a_string: string = "Hi"
    ```
 
 
+<a name="monitor"></a>
 ## Monitor
 
-You can view the current state of the memory, and memory arenas that have been allocated with `monitor()`:
+You can inspect the runtime memory state, active arenas, and currently live symbols at any point in your program using `monitor()`:
 
 ```javascript
-a: i32 = 3
-b: str = "Hello World"
+region foo
+foo::x: i32 = 6555
+monitor()
+
+clear foo
 monitor()
 ```
 
 Output:
 ```bash
-  Memory Monitor                                                                                                                                                                                                                                                                                                          
-  Arenas                                                                                                                                                                                                                                                                                                                  
+  Memory Monitor
+  Arenas
+  Current Arena: 0, Head: 0 / 1048576
+  Arena 1: Head: 0 / 1048576
+
+   Globals
+  foo: 1
+  foo_x: 6555
+
+   Locals (Frame #0)
+  (None)
+  Memory Monitor
+  Arenas
   Current Arena: 0, Head: 0 / 1048576
 
-   Globals                                                                                                                                                                                                                                                                                                                
-  a: 3
-  b: Hello World
+   Globals
 
-   Locals (Frame #0)                                                                                                                                                                                                                                                                                                      
+   Locals (Frame #0)
   (None)
 ```
+
+Notice how `monitor()` displays the active Arena 1 and `foo_x` while the region is active, and once `clear foo` runs, Arena 1 is reclaimed and the variable disappears from the active symbol table.
 
 <a name="types"></a>
 ## Types
 
-Mylo infers types at compile time, and can promote at runtime (math operations always use 64-bit floats).
-It uses **Type Annotations** to check safety of functions. This allows for efficient memory usage, 
-precise binary layouts, and seamless interoperability with C functions.
+Mylo is strictly and statically typed. It uses **Type Annotations** to guarantee type safety at compile time and runtime. This enables efficient memory packing, predictable binary layouts, and seamless interoperability with C functions.
 <a name="primitives"></a>
 ### Primitive Types
 
@@ -155,12 +173,13 @@ precise binary layouts, and seamless interoperability with C functions.
 
 #### Variable Annotations
 
-You can annotate variables to enforce types or define specific storage formats.
+Every variable in Mylo must be annotated with a specific type:
 
-**Standard Dynamic Variables:**
 ```javascript
-x: i32 = 10          // Defaults to 'num' (f64)
-list: i32[] = [1, 2]   // Defaults to generic list of 'num'
+x: i32 = 10                // 32-bit signed integer
+pi: f64 = 3.14159          // 64-bit float
+name: string = "Mylo"      // UTF-8 string
+active: bool = true        // Boolean flag
 ```
 
 **Typed Arrays:**
@@ -180,7 +199,7 @@ vertices: f32[] = [1.0, 0.5, -1.0]
 #### Type Behavior
 
 1.  **Storage:** Typed arrays (`i32[]`, `byte[]`, etc.) store elements tightly packed in memory, not as generic Mylo values. This significantly reduces memory overhead.
-2.  **Runtime:** When you access a value from a typed array (e.g. `val = counts[0]`), it is converted to a standard `num` (double) on the stack so you can perform standard math on it.
+2.  **Runtime:** When you access a value from a typed array (e.g. `val = counts[0]`), it is loaded as a 64-bit float (`double`) on the VM stack so you can perform standard math on it.
 3.  **C-Bindings:** When passing a typed array to a C binding (via `C(...)`), Mylo passes the raw pointer (e.g. `int*`, `unsigned char*`), allowing for zero-copy overhead.
 
 <a name="structs"></a>
@@ -362,7 +381,7 @@ for (x in 100-numbers) {
 numbers * 2    // [20, 40, 60]
 
 // Modulo
-var vals = [10, 11, 12]
+vals: i32[] = [10, 11, 12]
 vals % 2       // [0, 1, 0]
 ```
 
@@ -370,14 +389,14 @@ vals % 2       // [0, 1, 0]
 You can add strings to an array to **prepend** or **append** text to every element.
 
 ```javascript
-var files = ["image1", "image2"]
+files: string[] = ["image1", "image2"]
 
 // Append: Array + String
-var pngs = files + ".png" 
+pngs: string[] = files + ".png" 
 // ["image1.png", "image2.png"]
 
 // Prepend: String + Array
-var paths = "/home/user/" + pngs
+paths: string[] = "/home/user/" + pngs
 // ["/home/user/image1.png", "/home/user/image2.png"]
 ```
 
@@ -386,11 +405,11 @@ Byte arrays (`b"..."`) support vector math. The result is automatically promoted
 
 ```javascript
 // Raw bytes: [254, 255]
-var data = b"\xFE\xFF" 
+data: bytes = b"\xFE\xFF" 
 
 // Add 2 to every byte
 // Result is a number list: [256, 257]
-result: i32 = data + 2 
+result: i32[] = data + 2 
 
 print(result[0]) // 256
 ```
@@ -401,18 +420,18 @@ print(result[0]) // 256
 Bytes can be defined using the `b""` string literal. You can use standard ASCII characters or Hexadecimal escape codes for non-printable bytes.
 
 ```javascript
-var byte_e = b"0"
+byte_e: bytes = b"0"
 print(byte_e)
 
 // Standard Bytes
-var byte_array = b"PNG"
+byte_array: bytes = b"PNG"
 for (B in byte_array) {
     print(B) // Prints 80, 78, 71
 }
 
 // Hexadecimal Escape Codes
 // Represents [255, 0, 10, 65]
-var binary_data = b"\xFF\x00\x0A\x41"
+binary_data: bytes = b"\xFF\x00\x0A\x41"
 print(binary_data[0]) // 255
 ```
 
@@ -424,10 +443,10 @@ You can create a map using the map literal syntax `{}`. Keys must be strings, an
 
 ```javascript
 // Empty Map
-var empty = {}
+empty: map = {}
 
 // Map with initial values
-var user = {
+user: map = {
     "name" = "Alice",
     "age" = 30,
     "role" = "Admin"
@@ -442,7 +461,7 @@ Values are retrieved using the bracket syntax `["key"]`.
 **Note:** If a key does not exist, accessing it returns an empty string `""`.
 
 ```javascript
-var name = user["name"]
+name: string = user["name"]
 print(name) // "Alice"
 ```
 
@@ -466,7 +485,7 @@ user["status"] = "Active"
 ### Conditionals (If Statements)
 We can control the flow of our program like this.
 ```javascript
-var age = 5
+age: i32 = 5
 // This will print "Hello Little One"
 if (age < 10) {
     print("Hello Little One")
@@ -505,7 +524,7 @@ output:
 Checked loops check a value each iteration, they could loop
 forever if the checked value is never updated.
 ```javascript
-var index = 0
+index: i32 = 0
 for (index <= 100) {
     print(index)
     // If you comment this out, it will loop forever
@@ -517,8 +536,7 @@ for (index <= 100) {
 #### Iterated
 Lists can be iterated over, using the `in` keyword.
 ```javascript
-var my_pets = ["dog", "cat", "fish"]
-// notice we didn't need 'var x'
+my_pets: string[] = ["dog", "cat", "fish"]
 for (x in my_pets) {
     // This will print dog, then cat, then fish
     // each on a new line.
@@ -566,29 +584,24 @@ Subroutines/Functions can be defined to allow variables to be passed
 and *values* returned.
 
 ```javascript
-// This function takes an input 'n' and returns 
-// n + 1
-fn add_one_to_my_number(n)
-{
+// This function takes an input 'n' and returns n + 1
+fn add_one_to_my_number(n: i32) -> i32 {
     ret n + 1
 }
 
-var my_num = 99
+my_num: i32 = 99
 
 print(add_one_to_my_number(my_num))
 // ^^ prints 100 
 print(my_num)
-// ^^ prints 99? Why?
-// because my_num was copied to add_one_to_my_number
-// and the output was passed to print
+// ^^ prints 99: my_num was passed by value
 
-// Now what happens?
+// Now update my_num with the returned result
 my_num = add_one_to_my_number(my_num)
 print(my_num)
 ```
 
-Functions without type information are considered to have the annotation 'Any'. Here is an example of how to control 
-function prototypes.
+Functions without explicit type annotations default to `any`. You can annotate parameter types and return types using `-> Type`:
 
 ```javascript
 // Accepts and prints 'any'
@@ -596,41 +609,36 @@ fn foo(x) {
     print(x)
 }
 
-// Will only accept i32
-fn foo_i32(x: i32) {
-    print(x)
+// Accepts only i32 and returns an i32
+fn foo_i32(x: i32) -> i32 {
+    ret x * 2
 }
 ```
 
 <a name="passing-own-types"></a>
 #### Passing own types
 
-Functions can reference any type, but use *Strict Types*. This example show how to use a custom type.
-The last line shows how Runtime Type Checking is used to make sure functions are compatible.
+Functions can reference any type, including custom structs.
+
 ```javascript
-struct foo {
-    var name
+struct Person {
+    name: string
 }
 
-// Will will pass a list of foo, this must be specified
-fn list_names(n : foo[])
-{
-    // x needs to be defined as a foo.
-    for (x: foo in n) {
-        print(x.name)
+// Pass a list of Person structs
+fn list_names(people: Person[]) {
+    for (p: Person in people) {
+        print(p.name)
     }
-    // done.
     ret
 }
 
-// define some foos.
-var myvar0: foo = [{name="Harry"}, {name="Barry"}, {name="John"}]
+// Define some Person structs
+my_people: Person[] = [{name="Harry"}, {name="Barry"}, {name="John"}]
 
 // This prints 'Harry', 'Barry', 'John'
-list_names(myvar0)
-// This would fail, as 99 is not an obj foo[] (list of foo).
-// Runtime Error: Type Mismatch. Expected struct type 0, got 1
-// list_names([99])
+list_names(my_people)
+```
 ```
 
 <a name="scope-modules"></a>
@@ -674,32 +682,157 @@ print(MyFirstMod::a_big_number())
 print(a_big_number())
 ```
 <a name="memory-management"></a>
-## Memory Management - Arenas
+## Memory Management - Arenas & Regions
 
-Mylo relies entirely on **Memory Arenas**. The garbage collector has been removed because it is slow and non-deterministic.
-Arenas provide bump-allocation speed (as fast as stack allocations) and deterministic, instant cleanup.
+Mylo relies entirely on **Generational Memory Arenas**. The garbage collector has been removed in favor of bump-allocation speed (as fast as stack allocations) and deterministic, zero-overhead memory reclamation.
+
+Arenas eliminate GC pauses, heap fragmentation, and unpredictable latency, making Mylo ideal for systems programming, real-time games, audio, and embedded targets (like the Commodore Amiga).
+
+### How Arenas Work
+Instead of tracking individual object allocations with reference counters or tracing garbage collection passes:
+1. Allocations linearly bump a pointer within a dedicated chunk of memory (`MemoryArena`).
+2. Objects allocated within an arena live together.
+3. When the arena is cleared or its enclosing scope exits, the entire block of memory is reclaimed instantaneously in $O(1)$ time by resetting the head pointer and incrementing the generation counter.
 
 ### The 'main' Arena
-By default, all allocations at the global/outer scope live in the `main` arena.
+By default, all global allocations outside of any explicit region live in Arena 0 (the `main` arena).
 
-### Scoped Arena Syntax
-Scoped arenas are introduced using the `{[<arena_name>] ... }` syntax.
-Everything allocated within this block is placed into that arena. When the block scope exits, the arena is instantly destroyed.
+---
 
+<a name="lexical-scoped-region-blocks"></a>
+### Lexical Scoped Region Blocks
+
+For scoped, temporary allocations, Mylo provides `region` blocks. All dynamic values (such as arrays, maps, strings, and structs) created within the block are placed into a freshly allocated arena. When execution exits the closing brace `}`, the arena is automatically freed and all memory is instantly reclaimed.
+
+#### Anonymous Regions
 ```javascript
-{[my_arena] // Everything in this scope is in my_arena
-
-    x: u32 = 5
-    arr: u32[] = [1, 2, 3]
-
-} // my_arena is no more! Memory is instantly reclaimed.
-
-print(x) // Compiler error: x does not exist outside its scope
+region {
+    temp_arr: i32[] = [1, 2, 3, 4, 5]
+    print(temp_arr[0]) // 1
+    print(temp_arr[4]) // 5
+}
+// Arena is destroyed here; temp_arr is out of scope and memory is reclaimed.
 ```
+
+#### Named Region Blocks
+You can give lexical regions an explicit name for documentation and debugging clarity:
+```javascript
+x: i64 = 999
+region myregion {
+    v: i32 = 777
+    arr: i32[] = [10, 20, 30]
+    print(v)       // 777
+    print(arr[1])  // 20
+}
+print(x) // 999
+```
+
+#### Nested Regions
+Regions can be nested arbitrarily. Mylo manages an internal arena stack (`vm.arena_stack`) that pushes each newly created arena and pops back to the parent arena when the inner region completes:
+```javascript
+region outer {
+    a: i32 = 100
+    region inner {
+        b: i32 = 200
+        print(a + b) // 300
+    }
+    print(a) // 100
+}
+```
+
+#### Regions Inside Functions
+Regions are particularly effective inside performance-critical functions or game loops, allowing heavy temporary scratchpad work without leaking memory:
+```javascript
+fn compute_sum() -> i32 {
+    region temp {
+        buffer: i32[] = [10, 20, 30, 40]
+        total: i32 = 0
+        for (item in buffer) {
+            total = total + item
+        }
+        ret total
+    }
+}
+print(compute_sum()) // 100
+```
+
+---
+
+<a name="persistent-named-regions--explicit-lifecycles"></a>
+### Persistent Named Regions & Explicit Lifecycles
+
+While lexical `region { ... }` blocks mirror the call stack, many architectures (such as state machines, asset loaders, level systems, and long-lived game loops) require allocations that span multiple functions or frames before being bulk-cleared on demand.
+
+Mylo supports **Persistent Named Regions** using the syntax `region <name>`, qualified member assignment `<name>::<var>`, and explicit teardown with `clear <name>` (or `clear(<name>)`).
+
+#### Declaring and Populating a Named Region
+```javascript
+region foo
+
+// Allocate variables directly into region 'foo'
+foo::x : i32 = 6555
+foo::arr : i32[] = [10, 20, 30]
+
+print(foo::x)      // 6555
+print(foo::arr[1]) // 20
+
+// Reclaim all memory allocated in 'foo'
+clear foo
+```
+
+#### Using Named Regions Across Function Boundaries
+Because persistent regions remain open until explicitly cleared, functions can populate them collaboratively:
+```javascript
+region cache
+
+fn populate_cache() {
+    cache::data : i32[] = [42, 84, 126]
+    print("Cache populated!")
+}
+
+fn process_cache() {
+    print(f"First element: {cache::data[0]}")
+    print(f"Second element: {cache::data[1]}")
+}
+
+populate_cache()
+process_cache()
+
+// Tear down the cache arena and free all items at once
+clear cache
+```
+
+---
+
+<a name="memory-reclamation--compile-time-safety"></a>
+### Memory Reclamation & Compile-Time Safety
+
+Mylo guarantees safety and prevents use-after-free bugs at compile-time:
+
+1. **Lexical Scope Errors:**
+   Referencing a variable declared inside a lexical region block from outside causes a compile-time error:
+   ```javascript
+   region myreg {
+       v: i32 = 42
+   }
+   print(v) // Compiler Error: Undefined var 'v'
+   ```
+
+2. **Access After `clear` Errors:**
+   Once a persistent region has been closed with `clear foo`, any subsequent access to symbols belonging to that region is caught and rejected by the compiler:
+   ```javascript
+   region foo
+   foo::x : i32 = 6555
+   clear foo
+   print(foo::x) // Compiler Error: Undefined var 'foo_x'
+   ```
+
+3. **Symbol Lifetime Tracking (`start_ip` / `end_ip`):**
+   The compiler records the exact instruction pointer range for which every symbol is valid. At runtime, tools like `monitor()`, the CLI debugger (`--db`), and the VSCode DAP debugger (`--dap`) query this table to ensure that only currently live variables are presented to the developer.
 
 ### Benefits of Arenas
 1. **Ultra Fast Allocation:** Allocation is a single pointer bump (no free-list traversal or GC tracking).
-2. **Instant Deallocation:** When the scope ends, memory is instantly reclaimed without GC pauses.
+2. **Instant Deallocation:** When the scope ends or `clear` runs, memory is instantly reclaimed without GC pauses.
 3. **Deterministic & Safe:** Scoping ensures that out-of-scope references are caught at compile-time.
 
 <a name="import"></a>
@@ -743,13 +876,13 @@ with C variables and functions.
 ### Source example.mylo
 ```javascript
 struct foo {
-    var x
+    x: i32
 }
 
 
 // Uses "c_foo" automatically, Mylo will make
 // this struct available at compile time.
-var oh_my: foo = C() -> foo {
+oh_my: foo = C() -> foo {
     c_foo val;
     val.x = 6;
     return val;
@@ -787,15 +920,15 @@ This includes arbitrary structures from C!
 
 <a name="getting-values-back"></a>
 #### Getting values back
-Mylo's numbers are doubles as default, so we can cast chars or other types and pass them back from C:
+Mylo numbers can cast bytes or other types and pass them back from C:
 ```javascript
 struct Color {
-    var r
-    var g
-    var b
+    r: f64
+    g: f64
+    b: f64
 }
 
-var pixel : Color = C() -> Color {
+pixel: Color = C() -> Color {
     struct color_rgb { char r; char g; char b; };
     // Simulated native data: 255 (0xFF), 0 (0x00), 128 (0x80)
     struct color_rgb raw = { 255, 0, 128 };
@@ -818,32 +951,28 @@ print(pixel.b) // Now prints 128
 ```javascript
 // Unknown return type falls back to 'MyloReturn'
 fn get_bytes() {
-    var x = C() -> byte[] {
+    x: bytes = C() -> byte[] {
         const char* my_data = "\x01\x02\x03\x00\x04";
         int len = 5;
 
-        // 1. Calculate size (Same as before)
+        // 1. Calculate size
         int doubles_needed = (len + 7) / 8;
 
-        // 2. Allocate (NOW RETURNS DOUBLE)
-        // heap_alloc now returns a packed handle, not a raw index.
+        // 2. Allocate handle
         double ptr = heap_alloc(2 + doubles_needed);
 
-        // 3. Resolve Pointer (CRITICAL NEW STEP)
-        // You must convert the handle into a raw C pointer to the memory.
+        // 3. Resolve Pointer
+        // Convert the handle into a raw C pointer to the memory.
         double* base = vm_resolve_ptr(ptr);
 
-        // 4. Write Header to 'base'
-        // TYPE_BYTES is -2
+        // 4. Write Header to 'base' (TYPE_BYTES is -2)
         base[0] = -2;
         base[1] = (double)len;
 
         // 5. Copy Data
-        // We take the address of the 3rd double (&base[2]) and write bytes there.
         memcpy(&base[2], my_data, len);
 
         // 6. Return the handle (ptr), NOT the raw pointer (base)
-        // T_OBJ is 2
         return (MyloReturn){ .value = ptr, .type = 2 };
     }
     ret x
@@ -852,49 +981,43 @@ fn get_bytes() {
 
 <a name="sending-values-to-c"></a>
 #### Sending values to C
-Here we send an int, and a string to c, and print them using
-printf.
-````javascript
-var a: i32 = 100
-var b = "200"
+Here we send an int, and a string to C, and print them using `printf`:
+```javascript
+a: i32 = 100
+b: str = "200"
 
 struct MyStruct {
-    var x
+    x: i32
 }
 
-var X : MyStruct = {x=9}
+X: MyStruct = {x=9}
 
-C(val: i32 = a, val2 : str = b, val3 : MyStruct = X) {
+C(val: i32 = a, val2: str = b, val3: MyStruct = X) {
     printf("Inside C: %d, %s, %d\n", (int)val, val2, (int)val3->x);
 }
-````
+```
 
 <a name="namespace-complexity"></a>
 #### Namespace Complexity
-Mylo uses `mod` as its module/namespace seperator. This
+Mylo uses `mod` as its module/namespace separator. This
 must be reflected in C bindings using underscores to type names, like so:
 
-````javascript
-
+```javascript
 mod FOO {
     struct BAR {
-        var x
+        x: i32
     }
     
     // Notice the type in this function is just BAR
     fn MyFunc(var0: BAR) {
-        // Notice tht type passed to C must be FOO_BAR
-        C(var_to_c : FOO_BAR = var0) {
-            
-            //... things
-            
+        // Notice the type passed to C must be FOO_BAR
+        C(var_to_c: FOO_BAR = var0) {
             // Access to the var
             var_to_c->x = 99999;
-
-            //... things
         }
     }
 }
+```
 
 
 ````

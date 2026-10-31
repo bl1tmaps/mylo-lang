@@ -46,7 +46,7 @@ The Mylo Standard Library provides essential built-in functions for file I/O, ma
     + [`remove(collection: any, key: any) -> void`](#removecollection-any-key-any---void)
     + [`min_list(list: f64[]) -> f64`](#min_listlist-f64---f64)
     + [`max_list(list: f64[]) -> f64`](#max_listlist-f64---f64)
-    + [`for_list(func_name: string, list: any[]) -> any[]`](#for_listfunc_name-string-list-any---any)
+    + [`for_list(array: any[], func_name: string) -> any[]`](#for_listarray-any-func_name-string---any)
     + [`filter(array: any[], func_name: string) -> any[]`](#filterarray-any-func_name-string---any)
     + [`param_filter(array: any[], func_name: string, param: any) -> any[]`](#param_filterarray-any-func_name-string-param-any---any)
     + [`copy(value: any) -> any`](#copyvalue-any---any)
@@ -537,24 +537,115 @@ Finds the largest numeric value in a list.
 
 ---
 
-<a name="for_listfunc_name-string-list-any---any"></a>
-### `for_list(func_name: string, list: any[]) -> any[]`
+<a name="for_listarray-any-func_name-string---any"></a>
+### `for_list(array: any[], func_name: string) -> any[]`
 
-Maps each element of `list` through the named function, returning a new array with the mapped results.
+Maps each element of `array` through the named function, returning a new array containing the mapped results.
+
+> [!NOTE]
+> `for_list` accepts arguments in either order for convenience and backwards compatibility: `for_list(array, "func")` or `for_list("func", array)`.
+> It supports generic arrays (`array`), packed typed arrays (`i32[]`, `f64[]`, `u8[]`, etc.), and struct arrays (`MyStruct[]`).
+
+#### Examples
+
+**Typed Primitive Array:**
+```mylo
+my_list : i32[] = [1...5]
+
+fn double_val(x: i32) -> i32 {
+    ret x * 2
+}
+
+doubled: i32[] = for_list(my_list, "double_val")
+print(doubled) // [2, 4, 6, 8, 10]
+```
+
+**Struct Array Mapping:**
+```mylo
+struct Point {
+    x: i32,
+    y: i32
+}
+
+fn get_x(p: Point) -> i32 {
+    ret p.x
+}
+
+pts: Point[] = [{ x = 10, y = 20 }, { x = 30, y = 40 }]
+xs: i32[] = for_list(pts, "get_x")
+print(xs) // [10, 30]
+```
 
 ---
 
 <a name="filterarray-any-func_name-string---any"></a>
 ### `filter(array: any[], func_name: string) -> any[]`
 
-Filters elements in `array` by calling `func_name(item)` and retaining items where the predicate returns true.
+Filters elements in `array` by calling `func_name(item)` and retaining items where the predicate returns truthy (`true` or non-zero). The resulting array preserves the underlying type of the original array (e.g. filtering an `i32[]` returns an `i32[]`, filtering a `struct[]` returns a `struct[]`).
+
+> [!NOTE]
+> `filter` accepts arguments in either order: `filter(array, "func")` or `filter("func", array)`.
+
+#### Examples
+
+**Filtering a Typed Array:**
+```mylo
+my_list : i32[] = [0...10]
+
+fn bigger_than_5(x: i32) -> bool {
+    ret x > 5
+}
+
+filtered: i32[] = filter(my_list, "bigger_than_5")
+print(filtered) // [6, 7, 8, 9, 10]
+```
+
+**Filtering a Struct Array:**
+```mylo
+struct Item {
+    id: i32,
+    price: f64
+}
+
+fn is_expensive(item: Item) -> bool {
+    ret item.price > 50.0
+}
+
+items: Item[] = [
+    { id = 1, price = 19.99 },
+    { id = 2, price = 89.50 },
+    { id = 3, price = 120.00 }
+]
+
+expensive_items: Item[] = filter(items, "is_expensive")
+print(len(expensive_items)) // 2
+for (it: Item in expensive_items) {
+    print(it.id) // 2, then 3
+}
+```
 
 ---
 
 <a name="param_filterarray-any-func_name-string-param-any---any"></a>
 ### `param_filter(array: any[], func_name: string, param: any) -> any[]`
 
-Filters elements in `array` by calling `func_name(item, param)` with an extra parameter.
+Filters elements in `array` by calling `func_name(item, param)` with an extra parameter, retaining items where the function returns truthy. Preserves the underlying array type.
+
+> [!NOTE]
+> `param_filter` accepts either `param_filter(array, "func", param)` or `param_filter("func", array, param)`.
+
+#### Example
+
+```mylo
+my_list: i32[] = [1, 5, 10, 15, 20]
+
+fn greater_than(x: i32, threshold: i32) -> bool {
+    ret x > threshold
+}
+
+res: i32[] = param_filter(my_list, "greater_than", 9)
+print(res) // [10, 15, 20]
+```
 
 ---
 

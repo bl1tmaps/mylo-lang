@@ -28,6 +28,11 @@ mod PW {
     KEY_ESCAPE: i32    = 27
     KEY_SPACE: i32     = 32
 
+    KEY_A: i32         = 65
+    KEY_D: i32         = 68
+    KEY_S: i32         = 83
+    KEY_W: i32         = 87
+
     KEY_LEFT: i32      = 256
     KEY_RIGHT: i32     = 257
     KEY_UP: i32        = 258

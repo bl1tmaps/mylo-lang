@@ -345,7 +345,7 @@ void std_type(VM *vm) {
 }
 
 static inline bool is_any_array_type(int type) {
-  return (type <= TYPE_ARRAY && type != TYPE_MAP && type != TYPE_STR && type != TYPE_VOID);
+  return (type <= TYPE_ARRAY && type != TYPE_MAP && type != TYPE_STR && type != TYPE_VOID && type != TYPE_STRUCT && type != TYPE_ENUM);
 }
 
 static inline double get_array_element(double *base, int *types, int type, int i, int *out_type) {
@@ -371,6 +371,32 @@ static inline double get_array_element(double *base, int *types, int type, int i
     case TYPE_I64:        return (double)((long long *)data)[i];
     case TYPE_F64:        return ((double *)data)[i];
     default:              return ((double *)data)[i];
+  }
+}
+
+static inline void set_array_element(double *base, int *types, int type, int i, double val, int val_type) {
+  if (type == TYPE_ARRAY) {
+    base[HEAP_HEADER_ARRAY + i] = val;
+    if (types) types[HEAP_HEADER_ARRAY + i] = val_type;
+    return;
+  }
+  char *data = (char *)&base[HEAP_HEADER_ARRAY];
+  switch (type) {
+    case TYPE_U8:
+    case TYPE_BYTES:
+    case TYPE_BOOL:
+    case TYPE_BOOL_ARRAY: ((unsigned char *)data)[i] = (unsigned char)val; break;
+    case TYPE_I8:         ((signed char *)data)[i] = (signed char)val; break;
+    case TYPE_U16:        ((unsigned short *)data)[i] = (unsigned short)val; break;
+    case TYPE_I16:        ((short *)data)[i] = (short)val; break;
+    case TYPE_F16:        ((short *)data)[i] = (short)val; break;
+    case TYPE_U32:        ((unsigned int *)data)[i] = (unsigned int)val; break;
+    case TYPE_I32:        ((int *)data)[i] = (int)val; break;
+    case TYPE_F32:        ((float *)data)[i] = (float)val; break;
+    case TYPE_U64:        ((unsigned long long *)data)[i] = (unsigned long long)val; break;
+    case TYPE_I64:        ((long long *)data)[i] = (long long)val; break;
+    case TYPE_F64:        ((double *)data)[i] = (double)val; break;
+    default:              ((double *)data)[i] = (double)val; break;
   }
 }
 
@@ -959,21 +985,33 @@ void std_range(VM *vm) {
 }
 
 void std_for_list(VM *vm) {
-  double list_ref = vm_pop(vm);
-  double func_val = vm_pop(vm);
+  double arg2 = vm_pop(vm);
+  int type2 = vm->stack_types[vm->sp + 1];
+
+  double arg1 = vm_pop(vm);
+  int type1 = vm->stack_types[vm->sp + 1];
+
+  double list_ref;
+  double func_val;
+
+  if (type1 == T_OBJ && type2 == T_STR) {
+    list_ref = arg1;
+    func_val = arg2;
+  } else if (type1 == T_STR && type2 == T_OBJ) {
+    list_ref = arg2;
+    func_val = arg1;
+  } else {
+    printf("Runtime Error: for_list expects an array and a function name string.\n");
+    exit(1);
+  }
 
   double *base = vm_resolve_ptr(vm, list_ref);
-  int *types = vm_resolve_type(vm, list_ref);
-
-  if (vm->stack_types[vm->sp + 2] != T_OBJ || (int)base[0] != TYPE_ARRAY) {
+  if (!base || !is_any_array_type((int)base[HEAP_OFFSET_TYPE])) {
     printf("Runtime Error: for_list expects an array.\n");
     exit(1);
   }
-  if (vm->stack_types[vm->sp + 1] != T_STR) {
-    printf("Runtime Error: for_list expects a function name.\n");
-    exit(1);
-  }
 
+  int arr_type = (int)base[HEAP_OFFSET_TYPE];
   const char *func_name = get_str(vm, func_val);
   int len = (int)base[HEAP_OFFSET_LEN];
 
@@ -999,22 +1037,22 @@ void std_for_list(VM *vm) {
 
   double res_ptr = heap_alloc(vm, len + HEAP_HEADER_ARRAY);
   double *res_base = vm_resolve_ptr(vm, res_ptr);
-  int *res_types = vm_resolve_type(vm, res_ptr);
-
-  res_base[0] = TYPE_ARRAY;
-  res_base[1] = (double)len;
+  res_base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+  res_base[HEAP_OFFSET_LEN] = (double)len;
 
   for (int i = 0; i < len; i++) {
-    double val = base[HEAP_HEADER_ARRAY + i];
-    int type = types[HEAP_HEADER_ARRAY + i];
+    base = vm_resolve_ptr(vm, list_ref);
+    int *types = vm_resolve_type(vm, list_ref);
+    int elem_type = T_NUM;
+    double val = get_array_element(base, types, arr_type, i, &elem_type);
 
     if (native_target) {
-      vm_push(vm, val, type);
+      vm_push(vm, val, elem_type);
       native_target(vm);
     } else {
       vm_push(vm, (double)vm->code_size, T_NUM);
       vm_push(vm, (double)vm->fp, T_NUM);
-      vm_push(vm, val, type);
+      vm_push(vm, val, elem_type);
       vm->fp = vm->sp;
 
       run_vm_from(vm, user_func_addr, false);
@@ -1023,6 +1061,8 @@ void std_for_list(VM *vm) {
     double res = vm_pop(vm);
     int res_type = vm->stack_types[vm->sp + 1];
 
+    res_base = vm_resolve_ptr(vm, res_ptr);
+    int *res_types = vm_resolve_type(vm, res_ptr);
     res_base[HEAP_HEADER_ARRAY + i] = res;
     res_types[HEAP_HEADER_ARRAY + i] = res_type;
   }
@@ -2290,36 +2330,36 @@ void std_call(VM *vm) {
 }
 
 void std_filter(VM *vm) {
-  // Arguments are pushed left-to-right, so the string is popped first.
-  // Example: filter(L, "filt") -> Pop 1: "filt", Pop 2: L
-  double func_val = vm_pop(vm);
-  int func_type = vm->stack_types[vm->sp + 1];
+  double arg2 = vm_pop(vm);
+  int type2 = vm->stack_types[vm->sp + 1];
 
-  double list_ref = vm_pop(vm);
-  int list_type = vm->stack_types[vm->sp + 1];
+  double arg1 = vm_pop(vm);
+  int type1 = vm->stack_types[vm->sp + 1];
 
-  if (list_type != T_OBJ) {
-    printf("Runtime Error: filter() expects an array as the first argument.\n");
-    exit(1);
-  }
-  if (func_type != T_STR) {
-    printf("Runtime Error: filter() expects a string (function name) as the "
-           "second argument.\n");
+  double list_ref;
+  double func_val;
+
+  if (type1 == T_OBJ && type2 == T_STR) {
+    list_ref = arg1;
+    func_val = arg2;
+  } else if (type1 == T_STR && type2 == T_OBJ) {
+    list_ref = arg2;
+    func_val = arg1;
+  } else {
+    printf("Runtime Error: filter() expects an array and a function name string.\n");
     exit(1);
   }
 
   double *base = vm_resolve_ptr(vm, list_ref);
-  int *types = vm_resolve_type(vm, list_ref);
-
-  if (!base || (int)base[HEAP_OFFSET_TYPE] != TYPE_ARRAY) {
+  if (!base || !is_any_array_type((int)base[HEAP_OFFSET_TYPE])) {
     printf("Runtime Error: filter() expects a valid array.\n");
     exit(1);
   }
 
+  int arr_type = (int)base[HEAP_OFFSET_TYPE];
   const char *func_name = get_str(vm, func_val);
   int len = (int)base[HEAP_OFFSET_LEN];
 
-  // Find the target function (Native stdlib or User VM Function)
   NativeFunc native_target = NULL;
   for (int i = 0; std_library[i].name != NULL; i++) {
     if (strcmp(std_library[i].name, func_name) == 0) {
@@ -2340,27 +2380,34 @@ void std_filter(VM *vm) {
 
   int saved_ip = vm->ip;
 
-  // Pre-allocate the maximum possible size for the new array on the heap
-  double res_ptr = heap_alloc(vm, len + HEAP_HEADER_ARRAY);
-  double *res_base = vm_resolve_ptr(vm, res_ptr);
-  int *res_types = vm_resolve_type(vm, res_ptr);
+  int elem_size = get_type_size(arr_type);
+  int doubles_needed;
+  if (arr_type == TYPE_ARRAY) {
+    doubles_needed = len;
+  } else {
+    doubles_needed = (len * elem_size + 7) / 8;
+  }
 
-  res_base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+  double res_ptr = heap_alloc(vm, doubles_needed + HEAP_HEADER_ARRAY);
+  double *res_base = vm_resolve_ptr(vm, res_ptr);
+  res_base[HEAP_OFFSET_TYPE] = (double)arr_type;
+  res_base[HEAP_OFFSET_LEN] = 0.0;
 
   int kept_count = 0;
 
   for (int i = 0; i < len; i++) {
-    double val = base[HEAP_HEADER_ARRAY + i];
-    int type = types[HEAP_HEADER_ARRAY + i];
+    base = vm_resolve_ptr(vm, list_ref);
+    int *types = vm_resolve_type(vm, list_ref);
+    int elem_type = T_NUM;
+    double val = get_array_element(base, types, arr_type, i, &elem_type);
 
     if (native_target) {
-      vm_push(vm, val, type);
+      vm_push(vm, val, elem_type);
       native_target(vm);
     } else {
-      // Setup dummy stack frame for the VM function call
-      vm_push(vm, (double)vm->code_size, T_NUM); // Return IP
-      vm_push(vm, (double)vm->fp, T_NUM);        // Return FP
-      vm_push(vm, val, type);                    // Argument
+      vm_push(vm, (double)vm->code_size, T_NUM);
+      vm_push(vm, (double)vm->fp, T_NUM);
+      vm_push(vm, val, elem_type);
       vm->fp = vm->sp;
 
       run_vm_from(vm, user_func_addr, false);
@@ -2369,21 +2416,20 @@ void std_filter(VM *vm) {
     double res = vm_pop(vm);
     int res_type = vm->stack_types[vm->sp + 1];
 
-    // Filter logic: keep if the function evaluates to a truthy (non-zero)
-    // number
     bool keep = false;
     if (res_type == T_NUM && res != 0.0) {
       keep = true;
     }
 
     if (keep) {
-      res_base[HEAP_HEADER_ARRAY + kept_count] = val;
-      res_types[HEAP_HEADER_ARRAY + kept_count] = type;
+      res_base = vm_resolve_ptr(vm, res_ptr);
+      int *res_types = vm_resolve_type(vm, res_ptr);
+      set_array_element(res_base, res_types, arr_type, kept_count, val, elem_type);
       kept_count++;
     }
   }
 
-  // Set the actual length to how many elements passed the filter
+  res_base = vm_resolve_ptr(vm, res_ptr);
   res_base[HEAP_OFFSET_LEN] = (double)kept_count;
 
   vm->ip = saved_ip;
@@ -2391,35 +2437,36 @@ void std_filter(VM *vm) {
 }
 
 void std_param_filter(VM *vm) {
-  // Pop in reverse order: param, func_name, list
   double param_val = vm_pop(vm);
   int param_type = vm->stack_types[vm->sp + 1];
 
-  double func_val = vm_pop(vm);
-  int func_type = vm->stack_types[vm->sp + 1];
+  double arg2 = vm_pop(vm);
+  int type2 = vm->stack_types[vm->sp + 1];
 
-  double list_ref = vm_pop(vm);
-  int list_type = vm->stack_types[vm->sp + 1];
+  double arg1 = vm_pop(vm);
+  int type1 = vm->stack_types[vm->sp + 1];
 
-  if (list_type != T_OBJ) {
-    printf("Runtime Error: param_filter() expects an array as the first "
-           "argument.\n");
-    exit(1);
-  }
-  if (func_type != T_STR) {
-    printf("Runtime Error: param_filter() expects a string as the second "
-           "argument.\n");
+  double list_ref;
+  double func_val;
+
+  if (type1 == T_OBJ && type2 == T_STR) {
+    list_ref = arg1;
+    func_val = arg2;
+  } else if (type1 == T_STR && type2 == T_OBJ) {
+    list_ref = arg2;
+    func_val = arg1;
+  } else {
+    printf("Runtime Error: param_filter() expects an array and a function name string.\n");
     exit(1);
   }
 
   double *base = vm_resolve_ptr(vm, list_ref);
-  int *types = vm_resolve_type(vm, list_ref);
-
-  if (!base || (int)base[HEAP_OFFSET_TYPE] != TYPE_ARRAY) {
+  if (!base || !is_any_array_type((int)base[HEAP_OFFSET_TYPE])) {
     printf("Runtime Error: param_filter() expects a valid array.\n");
     exit(1);
   }
 
+  int arr_type = (int)base[HEAP_OFFSET_TYPE];
   const char *func_name = get_str(vm, func_val);
   int len = (int)base[HEAP_OFFSET_LEN];
 
@@ -2444,30 +2491,37 @@ void std_param_filter(VM *vm) {
 
   int saved_ip = vm->ip;
 
-  double res_ptr = heap_alloc(vm, len + HEAP_HEADER_ARRAY);
-  double *res_base = vm_resolve_ptr(vm, res_ptr);
-  int *res_types = vm_resolve_type(vm, res_ptr);
+  int elem_size = get_type_size(arr_type);
+  int doubles_needed;
+  if (arr_type == TYPE_ARRAY) {
+    doubles_needed = len;
+  } else {
+    doubles_needed = (len * elem_size + 7) / 8;
+  }
 
-  res_base[HEAP_OFFSET_TYPE] = TYPE_ARRAY;
+  double res_ptr = heap_alloc(vm, doubles_needed + HEAP_HEADER_ARRAY);
+  double *res_base = vm_resolve_ptr(vm, res_ptr);
+  res_base[HEAP_OFFSET_TYPE] = (double)arr_type;
+  res_base[HEAP_OFFSET_LEN] = 0.0;
+
   int kept_count = 0;
 
   for (int i = 0; i < len; i++) {
-    double val = base[HEAP_HEADER_ARRAY + i];
-    int type = types[HEAP_HEADER_ARRAY + i];
+    base = vm_resolve_ptr(vm, list_ref);
+    int *types = vm_resolve_type(vm, list_ref);
+    int elem_type = T_NUM;
+    double val = get_array_element(base, types, arr_type, i, &elem_type);
 
     if (native_target) {
-      vm_push(vm, val, type);
+      vm_push(vm, val, elem_type);
       vm_push(vm, param_val, param_type);
       native_target(vm);
     } else {
-      // Setup stack frame for a 2-argument Mylo function
-      vm_push(vm, (double)vm->code_size, T_NUM); // Return IP
-      vm_push(vm, (double)vm->fp, T_NUM);        // Return FP
-
-      vm_push(vm, val, type); // Arg 1 (The element)
-      int new_fp = vm->sp;    // FP points to the first argument
-
-      vm_push(vm, param_val, param_type); // Arg 2 (The parameter)
+      vm_push(vm, (double)vm->code_size, T_NUM);
+      vm_push(vm, (double)vm->fp, T_NUM);
+      vm_push(vm, val, elem_type);
+      int new_fp = vm->sp;
+      vm_push(vm, param_val, param_type);
       vm->fp = new_fp;
 
       run_vm_from(vm, user_func_addr, false);
@@ -2477,12 +2531,14 @@ void std_param_filter(VM *vm) {
     int res_type = vm->stack_types[vm->sp + 1];
 
     if (res_type == T_NUM && res != 0.0) {
-      res_base[HEAP_HEADER_ARRAY + kept_count] = val;
-      res_types[HEAP_HEADER_ARRAY + kept_count] = type;
+      res_base = vm_resolve_ptr(vm, res_ptr);
+      int *res_types = vm_resolve_type(vm, res_ptr);
+      set_array_element(res_base, res_types, arr_type, kept_count, val, elem_type);
       kept_count++;
     }
   }
 
+  res_base = vm_resolve_ptr(vm, res_ptr);
   res_base[HEAP_OFFSET_LEN] = (double)kept_count;
   vm->ip = saved_ip;
   vm_push(vm, res_ptr, T_OBJ);
@@ -2773,7 +2829,7 @@ const StdLibDef std_library[] = {
     {"split", std_split, "arr", 2, {"str", "str"}},
     {"where", std_where, "num", 2, {"any", "any"}},
     {"range", std_range, "arr", 3, {"num", "num", "num"}},
-    {"for_list", std_for_list, "arr", 2, {"str", "arr"}},
+    {"for_list", std_for_list, "arr", 2, {"arr", "str"}},
     {"seed", std_seed, "void", 1, {"num"}},
     {"rand", std_rand, "num", 0, {NULL}},
     {"rand_normal", std_rand_normal, "num", 0, {NULL}},

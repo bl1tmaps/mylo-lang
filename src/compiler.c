@@ -122,6 +122,54 @@ static bool last_expr_was_range = false;
 
 Symbol globals[MAX_GLOBALS];
 int global_count = 0;
+int max_global_count = 0;
+
+typedef struct {
+    char name[MAX_IDENTIFIER];
+    int addr;
+    int start_ip;
+    int end_ip;
+    int scope_depth;
+} GlobalDebugSym;
+
+GlobalDebugSym global_debug_symbols[MAX_GLOBALS];
+
+typedef struct {
+    char name[MAX_IDENTIFIER];
+    int var_idx;
+    bool is_local;
+} CompilerRegion;
+
+static CompilerRegion compiler_regions[MAX_ARENAS];
+static int compiler_region_count = 0;
+
+static void register_compiler_region(const char* name, int var_idx, bool is_local) {
+    if (compiler_region_count < MAX_ARENAS) {
+        strcpy(compiler_regions[compiler_region_count].name, name);
+        compiler_regions[compiler_region_count].var_idx = var_idx;
+        compiler_regions[compiler_region_count].is_local = is_local;
+        compiler_region_count++;
+    }
+}
+
+static CompilerRegion* find_compiler_region(const char* name) {
+    for (int i = 0; i < compiler_region_count; i++) {
+        if (strcmp(compiler_regions[i].name, name) == 0) {
+            return &compiler_regions[i];
+        }
+    }
+    return NULL;
+}
+
+static CompilerRegion* get_region_for_namespaced_name(const char* name) {
+    for (int i = 0; i < compiler_region_count; i++) {
+        int len = strlen(compiler_regions[i].name);
+        if (strncmp(name, compiler_regions[i].name, len) == 0 && name[len] == '_') {
+            return &compiler_regions[i];
+        }
+    }
+    return NULL;
+}
 
 LocalSymbol locals[MAX_GLOBALS];
 int local_count = 0;
@@ -932,6 +980,8 @@ bool parse_namespaced_id(char *out_name) {
 
 void compiler_reset() {
     global_count = 0;
+    max_global_count = 0;
+    compiler_region_count = 0;
     local_count = 0;
     func_count = 0;
     struct_count = 0;
@@ -1616,7 +1666,7 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
         if (debug_symbol_count < MAX_DEBUG_SYMBOLS) {
             if (name) strcpy(debug_symbols[debug_symbol_count].name, name);
             debug_symbols[debug_symbol_count].stack_offset = local_count;
-            debug_symbols[debug_symbol_count].start_ip = compiling_vm->code_size;
+            debug_symbols[debug_symbol_count].start_ip = compiling_vm ? compiling_vm->code_size : 0;
             debug_symbols[debug_symbol_count].end_ip = -1;
             debug_symbol_count++;
         }
@@ -1637,7 +1687,34 @@ int alloc_var(bool is_loc, char *name, int type_id, bool is_array) {
     globals[global_count].type_id = type_id;
     globals[global_count].is_array = is_array;
     globals[global_count].scope_depth = current_scope_depth;
+
+    if (global_count >= max_global_count) max_global_count = global_count + 1;
+
+    if (global_count < MAX_GLOBALS) {
+        if (name) strcpy(global_debug_symbols[global_count].name, m);
+        global_debug_symbols[global_count].addr = global_count;
+        global_debug_symbols[global_count].start_ip = compiling_vm ? compiling_vm->code_size : 0;
+        global_debug_symbols[global_count].end_ip = -1;
+        global_debug_symbols[global_count].scope_depth = current_scope_depth;
+    }
+
     return global_count++;
+}
+
+static void close_scope_debug_symbols(int saved_local_count, int depth) {
+    if (compiling_vm) {
+        int ip = compiling_vm->code_size;
+        for (int i = 0; i < max_global_count; i++) {
+            if (global_debug_symbols[i].end_ip == -1 && global_debug_symbols[i].scope_depth >= depth) {
+                global_debug_symbols[i].end_ip = ip;
+            }
+        }
+        for (int i = 0; i < debug_symbol_count; i++) {
+            if (debug_symbols[i].end_ip == -1 && debug_symbols[i].stack_offset >= saved_local_count) {
+                debug_symbols[i].end_ip = ip;
+            }
+        }
+    }
 }
 
 int get_var_addr(char *n, bool is_local, int explicit_type) {
@@ -1659,14 +1736,52 @@ int get_var_addr(char *n, bool is_local, int explicit_type) {
 static void parse_region() {
     match(TK_REGION);
     char name[MAX_IDENTIFIER];
-    strcpy(name, curr.text);
-    match(TK_ID);
-    emit(OP_NEW_ARENA);
-    int var_idx = alloc_var(inside_function, name, TYPE_ANY, false);
-    if (inside_function) {
-        emit(OP_SVAR); emit(locals[var_idx].offset);
+    name[0] = '\0';
+    if (curr.type == TK_ID) {
+        strcpy(name, curr.text);
+        match(TK_ID);
+    }
+
+    if (curr.type == TK_LBRACE) {
+        match(TK_LBRACE);
+        emit(OP_NEW_ARENA);
+
+        int saved_local_count = local_count;
+        int saved_global_count = global_count;
+        bool is_local_scope = inside_function;
+
+        emit(OP_SCOPE_ENTER);
+        current_scope_depth++;
+
+        while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        close_scope_debug_symbols(saved_local_count, current_scope_depth);
+
+        if (is_local_scope) {
+            int vars_to_pop = local_count - saved_local_count;
+            for (int k = 0; k < vars_to_pop; k++) emit(OP_POP);
+            local_count = saved_local_count;
+        } else {
+            global_count = saved_global_count;
+        }
+
+        emit(OP_SCOPE_EXIT);
+        current_scope_depth--;
+        match(TK_RBRACE);
+
+        emit(OP_DEL_ARENA);
     } else {
-        emit(OP_SET); emit(globals[var_idx].addr);
+        if (name[0] == '\0') {
+            error("Expected region name");
+        }
+        emit(OP_NEW_ARENA_PUSH);
+        int var_idx = alloc_var(inside_function, name, TYPE_ANY, false);
+        if (inside_function) {
+            emit(OP_SVAR); emit(locals[var_idx].offset);
+        } else {
+            emit(OP_SET); emit(globals[var_idx].addr);
+        }
+        register_compiler_region(name, var_idx, inside_function);
     }
 }
 
@@ -2011,9 +2126,17 @@ static void parse_var_decl(char *name) {
     TypeInfo type_info = parse_type_spec();
 
     bool handled = false;
+    CompilerRegion* reg = get_region_for_namespaced_name(name);
 
     if (curr.type == TK_EQ_ASSIGN) {
         match(TK_EQ_ASSIGN);
+
+        if (reg) {
+            emit(OP_PUSH_CTX);
+            int var_addr = reg->is_local ? locals[reg->var_idx].offset : globals[reg->var_idx].addr;
+            EMIT_GET(reg->is_local, var_addr);
+            emit(OP_SET_CTX);
+        }
 
         if (type_info.is_array && is_packed_array_type(type_info.id) && curr.type == TK_LBRACKET) {
             match(TK_LBRACKET);
@@ -2091,6 +2214,10 @@ static void parse_var_decl(char *name) {
             last_expr_was_range = false;
         }
 
+        if (reg) {
+            emit(OP_POP_CTX);
+        }
+
         if (type_info.id != TYPE_ANY && !type_info.is_array) {
             emit(OP_CAST);
             emit(type_info.id);
@@ -2104,8 +2231,9 @@ static void parse_var_decl(char *name) {
         }
     }
 
-    int var_idx = alloc_var(inside_function, name, type_info.id, type_info.is_array);
-    if (!inside_function) {
+    bool is_loc = reg ? reg->is_local : inside_function;
+    int var_idx = alloc_var(is_loc, name, type_info.id, type_info.is_array);
+    if (!is_loc) {
         emit(OP_SET);
         emit(globals[var_idx].addr);
     }
@@ -2137,7 +2265,19 @@ static void parse_id_statement(Token start_token, char *name) {
             error("Type mismatch: cannot assign string to non-string '%s'", name);
         }
 
+        CompilerRegion* reg = get_region_for_namespaced_name(name);
+        if (reg) {
+            emit(OP_PUSH_CTX);
+            int var_addr = reg->is_local ? locals[reg->var_idx].offset : globals[reg->var_idx].addr;
+            EMIT_GET(reg->is_local, var_addr);
+            emit(OP_SET_CTX);
+        }
+
         expression();
+
+        if (reg) {
+            emit(OP_POP_CTX);
+        }
 
         if (is_array && is_packed_array_type(var_type) && last_expr_was_range) {
             emit(OP_CAST_ARR);
@@ -2243,7 +2383,29 @@ static void parse_id_statement(Token start_token, char *name) {
                 if (type_id < 0) error("Accessing member '%s' of untyped/primitive var.", f);
 
                 int offset = find_field(type_id, f);
-                if (offset == -1) error("Struct '%s' has no field '%s'", struct_defs[type_id].name, f);
+                if (offset == -1) {
+                    int method_idx = find_method(type_id, f);
+                    if (method_idx != -1) {
+                        if (curr.type != TK_LPAREN) error("Method '%s' must be called", f);
+                        match(TK_LPAREN);
+                        int arg_count = 1; // 'self' is implicitly pushed
+                        if (curr.type != TK_RPAREN) {
+                            expression(); arg_count++;
+                            while (curr.type == TK_COMMA) { match(TK_COMMA); expression(); arg_count++; }
+                        }
+                        match(TK_RPAREN);
+                        char full_name[MAX_IDENTIFIER * 2];
+                        sprintf(full_name, "%s_%s", struct_defs[type_id].name, f);
+                        int faddr = find_func(full_name);
+                        if (faddr == -1) error("Undefined method '%s'", full_name);
+                        emit(OP_CALL);
+                        emit(faddr);
+                        emit(arg_count);
+                        emit(OP_POP);
+                        break;
+                    }
+                    error("Struct '%s' has no field or method '%s'", struct_defs[type_id].name, f);
+                }
 
                 int field_type = struct_defs[type_id].field_types[offset];
                 if (curr.type == TK_EQ_ASSIGN) {
@@ -2319,6 +2481,8 @@ static void parse_if() {
 
     while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
+    close_scope_debug_symbols(saved_local_count_if, current_scope_depth);
+
     if (is_local_scope) {
         int vars_to_pop = local_count - saved_local_count_if;
         for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
@@ -2359,6 +2523,8 @@ static void parse_if() {
 
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
+        close_scope_debug_symbols(saved_local_count_elif, current_scope_depth);
+
         if (is_local_scope) {
             int vars_to_pop = local_count - saved_local_count_elif;
             for(int k = 0; k < vars_to_pop; k++) emit(OP_POP);
@@ -2390,6 +2556,8 @@ static void parse_if() {
         current_scope_depth++;
 
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        close_scope_debug_symbols(saved_local_count_else, current_scope_depth);
 
         if (is_local_scope) {
             int vars_to_pop = local_count - saved_local_count_else;
@@ -2786,10 +2954,73 @@ void statement() {
         parse_region();
     } else if (curr.type == TK_CLEAR) {
         match(TK_CLEAR);
-        match(TK_LPAREN);
-        expression();
-        match(TK_RPAREN);
-        emit(OP_DEL_ARENA);
+        char reg_name[MAX_IDENTIFIER];
+        if (curr.type == TK_LPAREN) {
+            match(TK_LPAREN);
+            strcpy(reg_name, curr.text);
+            match(TK_ID);
+            match(TK_RPAREN);
+        } else {
+            strcpy(reg_name, curr.text);
+            match(TK_ID);
+        }
+
+        CompilerRegion* reg = find_compiler_region(reg_name);
+        int var_addr = -1;
+        bool is_loc = false;
+        if (reg) {
+            var_addr = reg->is_local ? locals[reg->var_idx].offset : globals[reg->var_idx].addr;
+            is_loc = reg->is_local;
+        } else {
+            int loc = find_local(reg_name);
+            if (loc != -1) {
+                var_addr = locals[loc].offset;
+                is_loc = true;
+            } else {
+                int glob = find_global(reg_name);
+                if (glob != -1) {
+                    var_addr = globals[glob].addr;
+                    is_loc = false;
+                } else {
+                    error("Undefined region '%s'", reg_name);
+                }
+            }
+        }
+
+        EMIT_GET(is_loc, var_addr);
+        emit(OP_FREE_ARENA);
+
+        char prefix[MAX_IDENTIFIER + 2];
+        sprintf(prefix, "%s_", reg_name);
+        int prefix_len = strlen(prefix);
+
+        int ip = (compiling_vm ? compiling_vm->code_size : 0) - 1;
+        for (int i = 0; i < max_global_count; i++) {
+            if (strncmp(globals[i].name, prefix, prefix_len) == 0 || strcmp(globals[i].name, reg_name) == 0) {
+                globals[i].name[0] = '\0';
+                if (global_debug_symbols[i].end_ip == -1) global_debug_symbols[i].end_ip = ip;
+            }
+        }
+        for (int i = 0; i < local_count; i++) {
+            if (strncmp(locals[i].name, prefix, prefix_len) == 0 || strcmp(locals[i].name, reg_name) == 0) {
+                locals[i].name[0] = '\0';
+            }
+        }
+        for (int i = 0; i < debug_symbol_count; i++) {
+            if (strncmp(debug_symbols[i].name, prefix, prefix_len) == 0 || strcmp(debug_symbols[i].name, reg_name) == 0) {
+                if (debug_symbols[i].end_ip == -1) debug_symbols[i].end_ip = ip;
+            }
+        }
+
+        for (int i = 0; i < compiler_region_count; i++) {
+            if (strcmp(compiler_regions[i].name, reg_name) == 0) {
+                for (int j = i; j < compiler_region_count - 1; j++) {
+                    compiler_regions[j] = compiler_regions[j + 1];
+                }
+                compiler_region_count--;
+                break;
+            }
+        }
     }
     else if (curr.type == TK_CFN) {   
         parse_cfn_decl();               
@@ -2863,6 +3094,8 @@ void statement() {
 
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
 
+        close_scope_debug_symbols(saved_local_count, current_scope_depth);
+
         if (is_local_scope) {
             int vars_to_pop = local_count - saved_local_count;
             for(int k=0; k<vars_to_pop; k++) emit(OP_POP);
@@ -2909,6 +3142,8 @@ void statement() {
         emit(OP_SCOPE_ENTER); current_scope_depth++; // Body Scope
 
         while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
+
+        close_scope_debug_symbols(saved_local_count, current_scope_depth);
 
         if (is_local_scope) {
             int vars_to_pop = local_count - saved_local_count;
@@ -3056,16 +3291,21 @@ void parse_internal(char *source, bool is_import) {
     if (!is_import) emit(OP_HLT);
 
     int end_ip = compiling_vm->code_size;
+    for (int i = 0; i < max_global_count; i++) {
+        if (global_debug_symbols[i].end_ip == -1) global_debug_symbols[i].end_ip = end_ip;
+    }
     for (int i = start_debug_idx; i < debug_symbol_count; i++) {
         if (debug_symbols[i].end_ip == -1) debug_symbols[i].end_ip = end_ip;
     }
     if (!is_import) {
         if (compiling_vm->global_symbols) free(compiling_vm->global_symbols);
-        compiling_vm->global_symbols = malloc(sizeof(VMSymbol) * global_count);
-        compiling_vm->global_symbol_count = global_count;
-        for (int i = 0; i < global_count; i++) {
-            strcpy(compiling_vm->global_symbols[i].name, globals[i].name);
+        compiling_vm->global_symbols = malloc(sizeof(VMSymbol) * max_global_count);
+        compiling_vm->global_symbol_count = max_global_count;
+        for (int i = 0; i < max_global_count; i++) {
+            strcpy(compiling_vm->global_symbols[i].name, global_debug_symbols[i].name);
             compiling_vm->global_symbols[i].addr = globals[i].addr;
+            compiling_vm->global_symbols[i].start_ip = global_debug_symbols[i].start_ip;
+            compiling_vm->global_symbols[i].end_ip = global_debug_symbols[i].end_ip;
         }
 
         if (compiling_vm->local_symbols) free(compiling_vm->local_symbols);
@@ -3242,7 +3482,7 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     int sym_count = vm->global_symbol_count > 0 ? vm->global_symbol_count : 1;
     fprintf(fp, "VMSymbol global_symbols[%d] = {\n", sym_count);
     for (int i = 0; i < vm->global_symbol_count; i++) {
-        fprintf(fp, "  {\"%s\", %d},\n", vm->global_symbols[i].name, vm->global_symbols[i].addr);
+        fprintf(fp, "  {\"%s\", %d, %d, %d},\n", vm->global_symbols[i].name, vm->global_symbols[i].addr, vm->global_symbols[i].start_ip, vm->global_symbols[i].end_ip);
     }
     fprintf(fp, "};\n\n");
 
@@ -3384,11 +3624,13 @@ void compile_repl(VM* vm, char *source, int *out_start_ip) {
     emit(OP_HLT);
 
     if (vm->global_symbols) free(vm->global_symbols);
-    vm->global_symbols = malloc(sizeof(VMSymbol) * global_count);
-    vm->global_symbol_count = global_count;
-    for (int i = 0; i < global_count; i++) {
-        strcpy(vm->global_symbols[i].name, globals[i].name);
-        vm->global_symbols[i].addr = globals[i].addr;
+    vm->global_symbols = malloc(sizeof(VMSymbol) * max_global_count);
+    vm->global_symbol_count = max_global_count;
+    for (int i = 0; i < max_global_count; i++) {
+        strcpy(vm->global_symbols[i].name, global_debug_symbols[i].name);
+        vm->global_symbols[i].addr = global_debug_symbols[i].addr;
+        vm->global_symbols[i].start_ip = global_debug_symbols[i].start_ip;
+        vm->global_symbols[i].end_ip = global_debug_symbols[i].end_ip;
     }
 }
 

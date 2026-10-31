@@ -307,15 +307,17 @@ void start_debug_adapter(VM* vm_in, const char* filename, const char* source_con
                 else if (ref == 2) { // Globals
                     if (vm->global_symbols) {
                          for(int i=0; i<vm->global_symbol_count; i++) {
+                             VMSymbol* sym = &vm->global_symbols[i];
+                             if ((vm->ip - 1) < sym->start_ip || (sym->end_ip != -1 && (vm->ip - 1) > sym->end_ip)) continue;
                              if (!first) strcat(json, ",");
-                             int addr = vm->global_symbols[i].addr;
+                             int addr = sym->addr;
                              double val = vm->globals[addr];
                              int type = vm->global_types[addr];
                              char item[512];
 
-                             if (type == T_NUM) snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}", vm->global_symbols[i].name, val);
-                             else if (type == T_STR) snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"\\\"...\\\"\", \"variablesReference\": 0}", vm->global_symbols[i].name);
-                             else snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"[Object]\", \"variablesReference\": 0}", vm->global_symbols[i].name);
+                             if (type == T_NUM) snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"%g\", \"variablesReference\": 0}", sym->name, val);
+                             else if (type == T_STR) snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"\\\"...\\\"\", \"variablesReference\": 0}", sym->name);
+                             else snprintf(item, 512, "{\"name\": \"%s\", \"value\": \"[Object]\", \"variablesReference\": 0}", sym->name);
 
                              strcat(json, item);
                              first = false;

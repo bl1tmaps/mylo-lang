@@ -176,12 +176,25 @@ range_arr: i32[] = [0...10]
 - **Structures**: Custom typed `struct` definitions
 
 ### Generational Scoped Arenas
-Mylo provides lexical scoped memory arenas for zero-overhead deterministic allocations:
+Mylo eliminates garbage collection pauses by using bump-allocated memory arenas with generational handles:
+
+**Lexical Scoped Blocks:**
 ```javascript
 region {
     temp: i32[] = [0...1000]
-    // Memory inside region is automatically cleaned up at scope exit
+    // Memory inside region is automatically reclaimed at scope exit
 }
+```
+
+**Persistent Named Regions & Explicit Lifecycles:**
+```javascript
+region cache
+cache::data: i32[] = [10, 20, 30]
+
+print(cache::data[0]) // 10
+
+// Reclaim all memory in 'cache' deterministically
+clear cache
 ```
 
 ## But everything cool is written in C, how do I use those libraries?

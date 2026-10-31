@@ -45,6 +45,7 @@ const char *OP_NAMES[] = {
     "EMBED",
     "MAKE_ARR",
     "NEW_REG", "DEL_REG", "SET_CTX",
+    "NEW_ARENA_PUSH", "PUSH_CTX", "POP_CTX", "FREE_ARENA",
     "MONITOR",
     "CAST",
     "CHECK_TYPE",
@@ -637,12 +638,14 @@ void dbg_print_state_window(VM* vm) {
     // Globals
     printf(UI_BG_CONTENT UI_FG_GRAY "  -- Globals --" EXTEND UI_RST "\n");
     for (int i = 0; i < vm->global_symbol_count; i++) {
+        VMSymbol* sym = &vm->global_symbols[i];
+        if ((vm->ip - 1) < sym->start_ip || (sym->end_ip != -1 && (vm->ip - 1) > sym->end_ip)) continue;
         if (i > 5) {
             printf(UI_BG_CONTENT UI_FG_GRAY "    ... (%d more)" EXTEND UI_RST "\n", vm->global_symbol_count - 5);
             break;
         }
-        int addr = vm->global_symbols[i].addr;
-        printf(UI_BG_CONTENT UI_FG_WHITE "    %-12s: " UI_FG_ACCENT, vm->global_symbols[i].name);
+        int addr = sym->addr;
+        printf(UI_BG_CONTENT UI_FG_WHITE "    %-12s: " UI_FG_ACCENT, sym->name);
         print_recursive(vm, vm->globals[addr], vm->global_types[addr], 0, 1);
         printf(EXTEND UI_RST "\n");
     }
@@ -685,8 +688,9 @@ double* find_debug_var(VM* vm, char* name, int* out_type) {
     }
     // 2. Search Globals
     for (int i = 0; i < vm->global_symbol_count; i++) {
-        if (strcmp(vm->global_symbols[i].name, name) == 0) {
-            int addr = vm->global_symbols[i].addr;
+        VMSymbol* sym = &vm->global_symbols[i];
+        if (strcmp(sym->name, name) == 0 && (vm->ip - 1) >= sym->start_ip && (sym->end_ip == -1 || (vm->ip - 1) <= sym->end_ip)) {
+            int addr = sym->addr;
             if (out_type) *out_type = vm->global_types[addr];
             return &vm->globals[addr];
         }
@@ -1608,15 +1612,23 @@ static void exec_monitor(VM* vm) {
 
     printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  Arenas" EXTEND UI_RST "\n");
     printf("  Current Arena: %d, Head: %d / %d\n", vm->current_arena, vm->arenas[vm->current_arena].head, vm->arenas[vm->current_arena].capacity);
+    for (int i = 1; i < MAX_ARENAS; i++) {
+        if (vm->arenas[i].active && i != vm->current_arena) {
+            printf("  Arena %d: Head: %d / %d\n", i, vm->arenas[i].head, vm->arenas[i].capacity);
+        }
+    }
 
     //printf("\n--- Globals ---\n");
     printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "\n   Globals" EXTEND UI_RST "\n");
     if (vm->global_symbols) {
         for (int i = 0; i < vm->global_symbol_count; i++) {
-            int addr = vm->global_symbols[i].addr;
-            printf("  %s: ", vm->global_symbols[i].name);
-            print_recursive(vm, vm->globals[addr], vm->global_types[addr], 0, MYLO_MONITOR_DEPTH);
-            printf("\n");
+            VMSymbol* sym = &vm->global_symbols[i];
+            if ((vm->ip - 1) >= sym->start_ip && (sym->end_ip == -1 || (vm->ip - 1) <= sym->end_ip)) {
+                int addr = sym->addr;
+                printf("  %s: ", sym->name);
+                print_recursive(vm, vm->globals[addr], vm->global_types[addr], 0, MYLO_MONITOR_DEPTH);
+                printf("\n");
+            }
         }
     }
 
@@ -1947,6 +1959,42 @@ int vm_step(VM* vm, bool debug_trace) {
             int id = (int)vm_pop(vm);
             if (id >= 0 && id < MAX_ARENAS) {
                 vm->current_arena = id;
+            }
+            break;
+        }
+        case OP_NEW_ARENA_PUSH: {
+            int id = -1;
+            for (int i = 1; i < MAX_ARENAS; i++) {
+                if (!vm->arenas[i].active) { id = i; break; }
+            }
+            if (id == -1) RUNTIME_ERROR("Max Regions Reached");
+            init_arena(vm, id);
+            vm_push(vm, (double)id, T_NUM);
+            break;
+        }
+        case OP_PUSH_CTX: {
+            if (vm->arena_sp < MAX_ARENAS) {
+                vm->arena_stack[vm->arena_sp++] = vm->current_arena;
+            }
+            break;
+        }
+        case OP_POP_CTX: {
+            if (vm->arena_sp > 0) {
+                vm->current_arena = vm->arena_stack[--vm->arena_sp];
+            } else {
+                vm->current_arena = 0;
+            }
+            break;
+        }
+        case OP_FREE_ARENA: {
+            CHECK_STACK(1);
+            int id = (int)vm_pop(vm);
+            if (id > 0 && id < MAX_ARENAS) {
+                free_arena(vm, id);
+                if (vm->current_arena == id) {
+                    if (vm->arena_sp > 0) vm->current_arena = vm->arena_stack[--vm->arena_sp];
+                    else vm->current_arena = 0;
+                }
             }
             break;
         }
