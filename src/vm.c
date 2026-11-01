@@ -2371,8 +2371,30 @@ void* load_library(const char* path) {
 
 void* get_symbol(void* handle, const char* symbol) {
 #ifdef _WIN32
-    if (!handle) handle = GetModuleHandle(NULL);
-    return (void*)GetProcAddress((HMODULE)handle, symbol);
+    if (handle) {
+        return (void*)GetProcAddress((HMODULE)handle, symbol);
+    }
+    void* proc = (void*)GetProcAddress(GetModuleHandle(NULL), symbol);
+    if (proc) return proc;
+
+    static const char* common_dlls[] = {
+        "ucrtbase.dll",
+        "msvcrt.dll",
+        "kernel32.dll",
+        "ntdll.dll",
+        "user32.dll"
+    };
+    for (size_t i = 0; i < sizeof(common_dlls) / sizeof(common_dlls[0]); i++) {
+        HMODULE hMod = GetModuleHandleA(common_dlls[i]);
+        if (!hMod) {
+            hMod = LoadLibraryA(common_dlls[i]);
+        }
+        if (hMod) {
+            proc = (void*)GetProcAddress(hMod, symbol);
+            if (proc) return proc;
+        }
+    }
+    return NULL;
 #else
     if (!handle) {
 #ifdef RTLD_DEFAULT
