@@ -55,6 +55,10 @@ typedef enum {
     OP_NEW_ARENA,
     OP_DEL_ARENA,
     OP_SET_CTX,
+    OP_NEW_ARENA_PUSH,
+    OP_PUSH_CTX,
+    OP_POP_CTX,
+    OP_FREE_ARENA,
     OP_MONITOR,
     OP_CAST,
     OP_CHECK_TYPE,
@@ -90,6 +94,8 @@ typedef struct {
 typedef struct {
     char name[MAX_IDENTIFIER];
     int addr;
+    int start_ip;
+    int end_ip;
 } VMSymbol;
 
 typedef struct {
@@ -194,6 +200,7 @@ int vm_find_function(VM* vm, const char* name);
 void vm_register_function(VM* vm, const char* name, int addr);
 void print_recursive(VM* vm, double val, int type, int depth, int max_elem);
 double vm_evacuate_object(VM* vm, double ptr_val, int target_head);
+int get_type_size(int heap_type);
 void enter_debugger(VM* vm);
 void print_raw(VM* vm, const char* str);
 
@@ -209,7 +216,7 @@ void free_arena(VM* vm, int id);
 #define MYLO_RETRIEVE_FROM_VM(vm, id, c_type, type_name) (c_type*)vm_get_ref(vm, (int)(id), type_name)
 #define MYLO_REGISTER_IN_VM(vm, ptr, type_name) vm_store_ptr(vm, (void*)(ptr), type_name)
 
-bool load_self_contained(VM* vm, const char* exe_path);
+
 
 // DLL Loading functions
 // Loads a shared library (.dll / .so) at the given path

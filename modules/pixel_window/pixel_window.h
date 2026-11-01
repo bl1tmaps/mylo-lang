@@ -476,6 +476,13 @@ static int pw__map_mac_key(unsigned short k) {
         case 36: return PW_KEY_ENTER; case 51: return PW_KEY_BACKSPACE;
         case 48: return PW_KEY_TAB;
         case 56: return PW_KEY_LSHIFT; case 60: return PW_KEY_RSHIFT;
+            // Function Keys
+        case 122: return PW_KEY_F1; case 120: return PW_KEY_F2;
+        case 99:  return PW_KEY_F3; case 118: return PW_KEY_F4;
+        case 96:  return PW_KEY_F5; case 97:  return PW_KEY_F6;
+        case 98:  return PW_KEY_F7; case 100: return PW_KEY_F8;
+        case 101: return PW_KEY_F9; case 109: return PW_KEY_F10;
+        case 103: return PW_KEY_F11; case 111: return PW_KEY_F12;
     }
     return 0;
 }
@@ -560,6 +567,7 @@ PixelWindow* pw_create_window(int width, int height, const char* title, bool res
 
     win->pipeline_state = [win->device newRenderPipelineStateWithDescriptor : pipelineDesc error : &error];
 
+    [win->window setAcceptsMouseMovedEvents : YES] ;
     [win->window makeKeyAndOrderFront : nil] ;
     [NSApp activateIgnoringOtherApps : YES] ;
 
@@ -577,15 +585,17 @@ bool pw_process_events(PixelWindow* win) {
             NSEventType type = [event type];
 
             if (type == NSEventTypeMouseMoved || type == NSEventTypeLeftMouseDragged ||
-                type == NSEventTypeRightMouseDragged || type == NSEventTypeOtherMouseDragged) {
+                type == NSEventTypeRightMouseDragged || type == NSEventTypeOtherMouseDragged ||
+                type == NSEventTypeLeftMouseDown || type == NSEventTypeLeftMouseUp ||
+                type == NSEventTypeRightMouseDown || type == NSEventTypeRightMouseUp) {
 
-            NSPoint p = [event locationInWindow];
-            NSRect contentRect = [[win->window contentView]frame];
-            win->input.mouse_x = p.x / contentRect.size.width;
-            win->input.mouse_y = 1.0f - (p.y / contentRect.size.height); // Flip Y 
-
+                NSPoint p = [event locationInWindow];
+                NSRect contentRect = [[win->window contentView] frame];
+                win->input.mouse_x = p.x / contentRect.size.width;
+                win->input.mouse_y = 1.0f - (p.y / contentRect.size.height); // Flip Y 
             }
-            else if (type == NSEventTypeLeftMouseDown) { PW__UPDATE_MOUSE(win, 0, true); }
+
+            if (type == NSEventTypeLeftMouseDown) { PW__UPDATE_MOUSE(win, 0, true); }
             else if (type == NSEventTypeLeftMouseUp) { PW__UPDATE_MOUSE(win, 0, false); }
             else if (type == NSEventTypeRightMouseDown) { PW__UPDATE_MOUSE(win, 1, true); }
             else if (type == NSEventTypeRightMouseUp) { PW__UPDATE_MOUSE(win, 1, false); }

@@ -1,0 +1,687 @@
+// =============================================================================
+// galaga.mylo - Classic Arcade Space Shooter in Mylo
+// =============================================================================
+
+module_path("modules/pixel_window/")
+module_path("../modules/pixel_window/")
+import native "pixel_window.mylo"
+
+// --- Window & Screen Configuration ---
+screen_w: i32 = 480
+screen_h: i32 = 640
+
+// --- Starfield Background ---
+struct Star {
+    x: i32,
+    y: i32,
+    speed: i32,
+    r: u8,
+    g: u8,
+    b: u8
+}
+
+stars: Star[] = [
+    {x=45,  y=30,  speed=1, r=100, g=120, b=180},
+    {x=120, y=90,  speed=2, r=180, g=200, b=255},
+    {x=210, y=40,  speed=3, r=255, g=255, b=255},
+    {x=330, y=110, speed=1, r=120, g=100, b=160},
+    {x=420, y=60,  speed=2, r=150, g=180, b=220},
+    {x=80,  y=170, speed=3, r=255, g=255, b=200},
+    {x=190, y=210, speed=1, r=90,  g=100, b=150},
+    {x=270, y=150, speed=2, r=200, g=220, b=255},
+    {x=380, y=230, speed=1, r=110, g=110, b=170},
+    {x=460, y=190, speed=2, r=170, g=190, b=240},
+    {x=30,  y=290, speed=2, r=190, g=200, b=255},
+    {x=140, y=340, speed=1, r=100, g=110, b=160},
+    {x=230, y=310, speed=3, r=255, g=255, b=255},
+    {x=310, y=380, speed=2, r=180, g=180, b=230},
+    {x=440, y=330, speed=1, r=90,  g=100, b=150},
+    {x=70,  y=440, speed=2, r=160, g=180, b=230},
+    {x=160, y=470, speed=3, r=255, g=240, b=180},
+    {x=260, y=420, speed=1, r=120, g=130, b=190},
+    {x=370, y=490, speed=2, r=190, g=210, b=255},
+    {x=430, y=460, speed=1, r=100, g=110, b=170},
+    {x=50,  y=560, speed=3, r=255, g=255, b=255},
+    {x=130, y=590, speed=1, r=110, g=120, b=180},
+    {x=220, y=540, speed=2, r=180, g=200, b=255},
+    {x=340, y=600, speed=1, r=90,  g=100, b=160},
+    {x=410, y=570, speed=2, r=170, g=190, b=240}
+]
+
+// --- Bullets & Bombs ---
+struct Bullet {
+    x: i32,
+    y: i32,
+    vy: i32,
+    active: bool
+}
+
+player_bullets: Bullet[] = [
+    {x=0, y=0, vy=-9, active=false},
+    {x=0, y=0, vy=-9, active=false},
+    {x=0, y=0, vy=-9, active=false},
+    {x=0, y=0, vy=-9, active=false},
+    {x=0, y=0, vy=-9, active=false},
+    {x=0, y=0, vy=-9, active=false},
+    {x=0, y=0, vy=-9, active=false},
+    {x=0, y=0, vy=-9, active=false}
+]
+
+alien_bombs: Bullet[] = [
+    {x=0, y=0, vy=5, active=false},
+    {x=0, y=0, vy=5, active=false},
+    {x=0, y=0, vy=5, active=false},
+    {x=0, y=0, vy=5, active=false},
+    {x=0, y=0, vy=5, active=false},
+    {x=0, y=0, vy=5, active=false},
+    {x=0, y=0, vy=5, active=false},
+    {x=0, y=0, vy=5, active=false}
+]
+
+// --- Alien Enemy Structure ---
+struct Alien {
+    x: i32,
+    y: i32,
+    base_x: i32,
+    base_y: i32,
+    rank: i32,
+    hp: i32,
+    state: i32,
+    alive: bool,
+    dive_t: f64,
+    dive_dir: f64
+}
+
+// 4 Bosses (row 0), 6 Butterflies (row 1), 6 Butterflies (row 2), 8 Bees (row 3) = 24 aliens
+aliens: Alien[] = [
+    // Row 0: Boss Galaga (Green/Blue, 2 HP)
+    {x=173, y=85,  base_x=173, base_y=85,  rank=3, hp=2, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=218, y=85,  base_x=218, base_y=85,  rank=3, hp=2, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+    {x=263, y=85,  base_x=263, base_y=85,  rank=3, hp=2, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=308, y=85,  base_x=308, base_y=85,  rank=3, hp=2, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+
+    // Row 1: Butterflies (Red, 1 HP)
+    {x=135, y=120, base_x=135, base_y=120, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=177, y=120, base_x=177, base_y=120, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+    {x=219, y=120, base_x=219, base_y=120, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=261, y=120, base_x=261, base_y=120, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+    {x=303, y=120, base_x=303, base_y=120, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=345, y=120, base_x=345, base_y=120, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+
+    // Row 2: Butterflies (Red, 1 HP)
+    {x=135, y=150, base_x=135, base_y=150, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=177, y=150, base_x=177, base_y=150, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+    {x=219, y=150, base_x=219, base_y=150, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=261, y=150, base_x=261, base_y=150, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+    {x=303, y=150, base_x=303, base_y=150, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=345, y=150, base_x=345, base_y=150, rank=2, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+
+    // Row 3: Bees (Yellow/Blue, 1 HP)
+    {x=107, y=180, base_x=107, base_y=180, rank=1, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=145, y=180, base_x=145, base_y=180, rank=1, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+    {x=183, y=180, base_x=183, base_y=180, rank=1, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=221, y=180, base_x=221, base_y=180, rank=1, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+    {x=259, y=180, base_x=259, base_y=180, rank=1, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=297, y=180, base_x=297, base_y=180, rank=1, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=-1.0},
+    {x=335, y=180, base_x=335, base_y=180, rank=1, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=1.0},
+    {x=373, y=180, base_x=373, base_y=180, rank=1, hp=1, state=0, alive=true, dive_t=0.0, dive_dir=-1.0}
+]
+
+// --- Explosion Particles ---
+struct Particle {
+    x: f64,
+    y: f64,
+    vx: f64,
+    vy: f64,
+    life: i32,
+    r: u8,
+    g: u8,
+    b: u8,
+    active: bool
+}
+
+particles: Particle[] = [
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false},
+    {x=0.0, y=0.0, vx=0.0, vy=0.0, life=0, r=255, g=255, b=255, active=false}
+]
+
+// --- Helper Drawing Functions ---
+fn draw_player(buf: u8[], w: i32, h: i32, px: i32, py: i32) {
+    PW::draw_triangle(buf, w, h, px, py - 13, px - 12, py + 10, px + 12, py + 10, 1, true, 255, 255, 255)
+    PW::draw_rect(buf, w, h, px - 13, py + 2, 4, 8, 1, true, 220, 30, 30)
+    PW::draw_rect(buf, w, h, px + 10, py + 2, 4, 8, 1, true, 220, 30, 30)
+    PW::draw_rect(buf, w, h, px - 2, py - 2, 5, 6, 1, true, 40, 140, 255)
+    PW::draw_triangle(buf, w, h, px - 3, py + 11, px + 3, py + 11, px, py + 16, 1, true, 255, 160, 20)
+}
+
+fn draw_boss(buf: u8[], w: i32, h: i32, ax: i32, ay: i32, hp: i32) {
+    if (hp == 1) {
+        PW::draw_triangle(buf, w, h, ax - 10, ay - 10, ax - 4, ay - 2, ax - 8, ay + 6, 1, true, 60, 120, 255)
+        PW::draw_triangle(buf, w, h, ax + 10, ay - 10, ax + 4, ay - 2, ax + 8, ay + 6, 1, true, 60, 120, 255)
+    } else {
+        PW::draw_triangle(buf, w, h, ax - 10, ay - 10, ax - 4, ay - 2, ax - 8, ay + 6, 1, true, 40, 200, 80)
+        PW::draw_triangle(buf, w, h, ax + 10, ay - 10, ax + 4, ay - 2, ax + 8, ay + 6, 1, true, 40, 200, 80)
+    }
+    PW::draw_rect(buf, w, h, ax - 5, ay - 5, 11, 12, 1, true, 240, 220, 40)
+    PW::draw_circle(buf, w, h, ax, ay, 3, 1, true, 220, 40, 40)
+}
+
+fn draw_butterfly(buf: u8[], w: i32, h: i32, ax: i32, ay: i32) {
+    PW::draw_triangle(buf, w, h, ax - 11, ay - 6, ax, ay, ax - 8, ay + 7, 1, true, 230, 40, 40)
+    PW::draw_triangle(buf, w, h, ax + 11, ay - 6, ax, ay, ax + 8, ay + 7, 1, true, 230, 40, 40)
+    PW::draw_rect(buf, w, h, ax - 6, ay - 2, 3, 5, 1, true, 255, 255, 255)
+    PW::draw_rect(buf, w, h, ax + 4, ay - 2, 3, 5, 1, true, 255, 255, 255)
+    PW::draw_circle(buf, w, h, ax, ay - 4, 3, 1, true, 250, 210, 30)
+}
+
+fn draw_bee(buf: u8[], w: i32, h: i32, ax: i32, ay: i32) {
+    PW::draw_triangle(buf, w, h, ax - 9, ay - 5, ax - 2, ay, ax - 7, ay + 6, 1, true, 40, 100, 240)
+    PW::draw_triangle(buf, w, h, ax + 9, ay - 5, ax + 2, ay, ax + 7, ay + 6, 1, true, 40, 100, 240)
+    PW::draw_rect(buf, w, h, ax - 4, ay - 5, 9, 10, 1, true, 255, 190, 20)
+    PW::draw_line(buf, w, h, ax - 3, ay, ax + 3, ay, 1, 30, 30, 30)
+    PW::draw_line(buf, w, h, ax - 3, ay + 3, ax + 3, ay + 3, 1, 30, 30, 30)
+}
+
+// --- Game State Variables ---
+player_x: i32 = 240
+player_y: i32 = 580
+player_speed: i32 = 5
+player_alive: bool = true
+player_lives: i32 = 3
+respawn_timer: i32 = 0
+shoot_cooldown: i32 = 0
+
+score: i32 = 0
+high_score: i32 = 20000
+stage: i32 = 1
+frame_count: i32 = 0
+dive_cooldown: i32 = 40
+game_over: bool = false
+
+// Create Window and Frame Buffer
+win: i32 = PW::create_window(screen_w, screen_h, "Mylo Galaga", false)
+buffer: u8[] = PW::create_buffer(screen_w, screen_h)
+
+// --- Main Arcade Loop ---
+forever {
+    if (PW::process_events(win) == false) {
+        break
+    }
+    if (PW::is_key_pressed(win, PW::KEY_ESCAPE)) {
+        break
+    }
+
+    frame_count = frame_count + 1
+
+    bi: i32 = 0
+    ai: i32 = 0
+    si: i32 = 0
+    pi: i32 = 0
+
+    // Restart game if game over
+    if (game_over) {
+        if (PW::is_key_pressed(win, PW::KEY_ENTER) || PW::is_key_pressed(win, PW::KEY_SPACE)) {
+            player_lives = 3
+            score = 0
+            stage = 1
+            game_over = false
+            player_alive = true
+            player_x = 240
+
+            ai = 0
+            for (ai < 24) {
+                aliens[ai].alive = true
+                aliens[ai].state = 0
+                aliens[ai].x = aliens[ai].base_x
+                aliens[ai].y = aliens[ai].base_y
+                if (aliens[ai].rank == 3) {
+                    aliens[ai].hp = 2
+                } else {
+                    aliens[ai].hp = 1
+                }
+                ai = ai + 1
+            }
+        }
+    }
+
+    // --- 1. Player Controls & Movement ---
+    if (player_alive && game_over == false) {
+        if (PW::is_key_down(win, PW::KEY_LEFT) || PW::is_key_down(win, PW::KEY_A)) {
+            player_x = player_x - player_speed
+            if (player_x < 24) {
+                player_x = 24
+            }
+        }
+        if (PW::is_key_down(win, PW::KEY_RIGHT) || PW::is_key_down(win, PW::KEY_D)) {
+            player_x = player_x + player_speed
+            if (player_x > screen_w - 24) {
+                player_x = screen_w - 24
+            }
+        }
+
+        // Firing dual lasers
+        if (shoot_cooldown > 0) {
+            shoot_cooldown = shoot_cooldown - 1
+        }
+        if (PW::is_key_down(win, PW::KEY_SPACE) && shoot_cooldown <= 0) {
+            shoot_cooldown = 12
+
+            // Spawn twin missiles
+            spawned: i32 = 0
+            bi = 0
+            for (bi < 8) {
+                if (player_bullets[bi].active == false && spawned == 0) {
+                    player_bullets[bi].x = player_x - 7
+                    player_bullets[bi].y = player_y - 12
+                    player_bullets[bi].active = true
+                    spawned = 1
+                }
+                bi = bi + 1
+            }
+            bi = 0
+            for (bi < 8) {
+                if (player_bullets[bi].active == false && spawned == 1) {
+                    player_bullets[bi].x = player_x + 7
+                    player_bullets[bi].y = player_y - 12
+                    player_bullets[bi].active = true
+                    spawned = 2
+                }
+                bi = bi + 1
+            }
+        }
+    } else {
+        // Respawning sequence
+        if (game_over == false) {
+            respawn_timer = respawn_timer - 1
+            if (respawn_timer <= 0) {
+                if (player_lives > 0) {
+                    player_alive = true
+                    player_x = 240
+                } else {
+                    game_over = true
+                }
+            }
+        }
+    }
+
+    // --- 2. Update Starfield ---
+    si = 0
+    for (si < 25) {
+        stars[si].y = stars[si].y + stars[si].speed
+        if (stars[si].y >= screen_h) {
+            stars[si].y = 0
+            stars[si].x = (rand() * 470) + 5
+        }
+        si = si + 1
+    }
+
+    // --- 3. Update Player Bullets ---
+    bi = 0
+    for (bi < 8) {
+        if (player_bullets[bi].active) {
+            player_bullets[bi].y = player_bullets[bi].y + player_bullets[bi].vy
+            if (player_bullets[bi].y < 0) {
+                player_bullets[bi].active = false
+            }
+        }
+        bi = bi + 1
+    }
+
+    // --- 4. Update Alien Bombs ---
+    bmb_i: i32 = 0
+    for (bmb_i < 8) {
+        if (alien_bombs[bmb_i].active) {
+            alien_bombs[bmb_i].y = alien_bombs[bmb_i].y + alien_bombs[bmb_i].vy
+            if (alien_bombs[bmb_i].y > screen_h) {
+                alien_bombs[bmb_i].active = false
+            }
+
+            // Check collision with player
+            if (player_alive && game_over == false) {
+                dx: i32 = alien_bombs[bmb_i].x - player_x
+                dy: i32 = alien_bombs[bmb_i].y - player_y
+                if (dx < 0) { dx = 0 - dx }
+                if (dy < 0) { dy = 0 - dy }
+
+                if (dx < 14 && dy < 14) {
+                    alien_bombs[bmb_i].active = false
+                    player_alive = false
+                    player_lives = player_lives - 1
+                    respawn_timer = 60
+
+                    // Spawn player explosion particles
+                    pi = 0
+                    for (pi < 16) {
+                        particles[pi].x = player_x
+                        particles[pi].y = player_y
+                        particles[pi].vx = (rand() * 8.0) - 4.0
+                        particles[pi].vy = (rand() * 8.0) - 4.0
+                        particles[pi].life = 25
+                        particles[pi].r = 255
+                        particles[pi].g = 200
+                        particles[pi].b = 50
+                        particles[pi].active = true
+                        pi = pi + 1
+                    }
+                }
+            }
+        }
+        bmb_i = bmb_i + 1
+    }
+
+    // --- 5. Formation Swaying & Dive Attack Logic ---
+    form_osc: f64 = sin(frame_count * 0.04) * 28.0
+    form_dx: i32 = form_osc
+
+    dive_cooldown = dive_cooldown - 1
+    if (dive_cooldown <= 0 && game_over == false) {
+        dive_cooldown = 60
+
+        // Select a living alien to initiate a dive attack
+        pick: i32 = rand() * 24.0
+        tries: i32 = 0
+        for (tries < 24) {
+            idx: i32 = (pick + tries) % 24
+            if (aliens[idx].alive && aliens[idx].state == 0) {
+                aliens[idx].state = 1
+                aliens[idx].dive_t = 0.0
+                if (aliens[idx].x < 240) {
+                    aliens[idx].dive_dir = 1.0
+                } else {
+                    aliens[idx].dive_dir = -1.0
+                }
+                break
+            }
+            tries = tries + 1
+        }
+    }
+
+    // Update Aliens
+    living_aliens: i32 = 0
+    ai = 0
+    for (ai < 24) {
+        if (aliens[ai].alive) {
+            living_aliens = living_aliens + 1
+
+            if (aliens[ai].state == 0) {
+                // In formation - sway horizontally
+                aliens[ai].x = aliens[ai].base_x + form_dx
+                aliens[ai].y = aliens[ai].base_y
+            } elif (aliens[ai].state == 1) {
+                // Diving attack run
+                aliens[ai].dive_t = aliens[ai].dive_t + 0.05
+                curve: f64 = sin(aliens[ai].dive_t * 2.4) * 4.5 * aliens[ai].dive_dir
+                aliens[ai].x = aliens[ai].x + curve
+                aliens[ai].y = aliens[ai].y + 4
+
+                // Drop an alien bomb during dive
+                if (rand() < 0.02) {
+                    bmb_slot: i32 = 0
+                    for (bmb_slot < 8) {
+                        if (alien_bombs[bmb_slot].active == false) {
+                            alien_bombs[bmb_slot].x = aliens[ai].x
+                            alien_bombs[bmb_slot].y = aliens[ai].y + 10
+                            alien_bombs[bmb_slot].active = true
+                            break
+                        }
+                        bmb_slot = bmb_slot + 1
+                    }
+                }
+
+                // Check collision with player
+                if (player_alive && game_over == false) {
+                    p_dx: i32 = aliens[ai].x - player_x
+                    p_dy: i32 = aliens[ai].y - player_y
+                    if (p_dx < 0) { p_dx = 0 - p_dx }
+                    if (p_dy < 0) { p_dy = 0 - p_dy }
+
+                    if (p_dx < 16 && p_dy < 16) {
+                        aliens[ai].alive = false
+                        player_alive = false
+                        player_lives = player_lives - 1
+                        respawn_timer = 60
+
+                        // Explosion
+                        pi = 0
+                        for (pi < 16) {
+                            particles[pi].x = player_x
+                            particles[pi].y = player_y
+                            particles[pi].vx = (rand() * 8.0) - 4.0
+                            particles[pi].vy = (rand() * 8.0) - 4.0
+                            particles[pi].life = 25
+                            particles[pi].r = 255
+                            particles[pi].g = 100
+                            particles[pi].b = 50
+                            particles[pi].active = true
+                            pi = pi + 1
+                        }
+                    }
+                }
+
+                // Loop around when passing bottom of screen
+                if (aliens[ai].y > screen_h + 20) {
+                    aliens[ai].y = -20
+                    aliens[ai].state = 2
+                }
+            } elif (aliens[ai].state == 2) {
+                // Returning to formation
+                target_x: i32 = aliens[ai].base_x + form_dx
+                if (aliens[ai].x < target_x) {
+                    aliens[ai].x = aliens[ai].x + 3
+                }
+                if (aliens[ai].x > target_x) {
+                    aliens[ai].x = aliens[ai].x - 3
+                }
+                aliens[ai].y = aliens[ai].y + 3
+
+                diff_x: i32 = aliens[ai].x - target_x
+                if (diff_x < 0) { diff_x = 0 - diff_x }
+
+                if (aliens[ai].y >= aliens[ai].base_y && diff_x < 6) {
+                    aliens[ai].state = 0
+                    aliens[ai].x = target_x
+                    aliens[ai].y = aliens[ai].base_y
+                }
+            }
+
+            // Bullet vs Alien Collision Check
+            bi = 0
+            for (bi < 8) {
+                if (player_bullets[bi].active) {
+                    hit_dx: i32 = player_bullets[bi].x - aliens[ai].x
+                    hit_dy: i32 = player_bullets[bi].y - aliens[ai].y
+                    if (hit_dx < 0) { hit_dx = 0 - hit_dx }
+                    if (hit_dy < 0) { hit_dy = 0 - hit_dy }
+
+                    if (hit_dx < 15 && hit_dy < 12) {
+                        player_bullets[bi].active = false
+                        aliens[ai].hp = aliens[ai].hp - 1
+
+                        if (aliens[ai].hp <= 0) {
+                            aliens[ai].alive = false
+
+                            // Score points
+                            if (aliens[ai].rank == 3) {
+                                if (aliens[ai].state == 1) {
+                                    score = score + 400
+                                } else {
+                                    score = score + 150
+                                }
+                            } elif (aliens[ai].rank == 2) {
+                                if (aliens[ai].state == 1) {
+                                    score = score + 160
+                                } else {
+                                    score = score + 80
+                                }
+                            } else {
+                                if (aliens[ai].state == 1) {
+                                    score = score + 100
+                                } else {
+                                    score = score + 50
+                                }
+                            }
+
+                            if (score > high_score) {
+                                high_score = score
+                            }
+
+                            // Trigger explosion particles
+                            exp_i: i32 = 0
+                            for (exp_i < 8) {
+                                pi = (ai * 8 + exp_i) % 16
+                                particles[pi].x = aliens[ai].x
+                                particles[pi].y = aliens[ai].y
+                                particles[pi].vx = (rand() * 6.0) - 3.0
+                                particles[pi].vy = (rand() * 6.0) - 3.0
+                                particles[pi].life = 16
+                                particles[pi].r = 255
+                                particles[pi].g = 220
+                                particles[pi].b = 30
+                                particles[pi].active = true
+                                exp_i = exp_i + 1
+                            }
+                        }
+                        break
+                    }
+                }
+                bi = bi + 1
+            }
+        }
+        ai = ai + 1
+    }
+
+    // Wave Clear: Respawn formation for next stage
+    if (living_aliens == 0 && game_over == false) {
+        stage = stage + 1
+        ai = 0
+        for (ai < 24) {
+            aliens[ai].alive = true
+            aliens[ai].state = 0
+            aliens[ai].x = aliens[ai].base_x
+            aliens[ai].y = aliens[ai].base_y
+            if (aliens[ai].rank == 3) {
+                aliens[ai].hp = 2
+            } else {
+                aliens[ai].hp = 1
+            }
+            ai = ai + 1
+        }
+    }
+
+    // --- 6. Update Particles ---
+    pi = 0
+    for (pi < 16) {
+        if (particles[pi].active) {
+            particles[pi].x = particles[pi].x + particles[pi].vx
+            particles[pi].y = particles[pi].y + particles[pi].vy
+            particles[pi].life = particles[pi].life - 1
+            if (particles[pi].life <= 0) {
+                particles[pi].active = false
+            }
+        }
+        pi = pi + 1
+    }
+
+    // --- 7. Render Everything to PixelBuffer ---
+    // Deep Space Background
+    PW::clear_buffer(buffer, screen_w, screen_h, 6, 8, 16)
+
+    // Render Starfield
+    si = 0
+    for (si < 25) {
+        PW::draw_pixel(buffer, screen_w, screen_h, stars[si].x, stars[si].y, stars[si].r, stars[si].g, stars[si].b)
+        si = si + 1
+    }
+
+    // Render Particles
+    pi = 0
+    for (pi < 16) {
+        if (particles[pi].active) {
+            PW::draw_rect(buffer, screen_w, screen_h, particles[pi].x, particles[pi].y, 2, 2, 1, true, particles[pi].r, particles[pi].g, particles[pi].b)
+        }
+        pi = pi + 1
+    }
+
+    // Render Player Bullets (Twin Red/Yellow Blasters)
+    bi = 0
+    for (bi < 8) {
+        if (player_bullets[bi].active) {
+            PW::draw_rect(buffer, screen_w, screen_h, player_bullets[bi].x - 1, player_bullets[bi].y - 6, 3, 8, 1, true, 255, 230, 40)
+            PW::draw_rect(buffer, screen_w, screen_h, player_bullets[bi].x, player_bullets[bi].y - 7, 1, 10, 1, true, 255, 60, 60)
+        }
+        bi = bi + 1
+    }
+
+    // Render Alien Bombs
+    bmb_i = 0
+    for (bmb_i < 8) {
+        if (alien_bombs[bmb_i].active) {
+            PW::draw_circle(buffer, screen_w, screen_h, alien_bombs[bmb_i].x, alien_bombs[bmb_i].y, 3, 1, true, 255, 50, 50)
+            PW::draw_pixel(buffer, screen_w, screen_h, alien_bombs[bmb_i].x, alien_bombs[bmb_i].y, 255, 255, 255)
+        }
+        bmb_i = bmb_i + 1
+    }
+
+    // Render Living Aliens
+    ai = 0
+    for (ai < 24) {
+        if (aliens[ai].alive) {
+            if (aliens[ai].rank == 3) {
+                draw_boss(buffer, screen_w, screen_h, aliens[ai].x, aliens[ai].y, aliens[ai].hp)
+            } elif (aliens[ai].rank == 2) {
+                draw_butterfly(buffer, screen_w, screen_h, aliens[ai].x, aliens[ai].y)
+            } else {
+                draw_bee(buffer, screen_w, screen_h, aliens[ai].x, aliens[ai].y)
+            }
+        }
+        ai = ai + 1
+    }
+
+    // Render Player Ship
+    if (player_alive && game_over == false) {
+        draw_player(buffer, screen_w, screen_h, player_x, player_y)
+    }
+
+    // --- 8. Render Arcade HUD ---
+    PW::draw_text(buffer, screen_w, screen_h, "1UP", 30, 8, 12, 255, 40, 40)
+    PW::draw_text(buffer, screen_w, screen_h, f"{score}", 30, 22, 14, 255, 255, 255)
+
+    PW::draw_text(buffer, screen_w, screen_h, "HIGH SCORE", 180, 8, 12, 255, 40, 40)
+    PW::draw_text(buffer, screen_w, screen_h, f"{high_score}", 205, 22, 14, 255, 255, 255)
+
+    // Stage indicator at bottom right
+    PW::draw_text(buffer, screen_w, screen_h, f"STAGE {stage}", screen_w - 95, screen_h - 22, 12, 60, 200, 255)
+
+    // Player remaining lives icons at bottom left
+    li: i32 = 0
+    for (li < player_lives - 1) {
+        draw_player(buffer, screen_w, screen_h, 30 + (li * 25), screen_h - 16)
+        li = li + 1
+    }
+
+    // Game Over Overlay
+    if (game_over) {
+        PW::draw_text(buffer, screen_w, screen_h, "GAME OVER", 160, 290, 20, 255, 30, 30)
+        PW::draw_text(buffer, screen_w, screen_h, "PRESS ENTER TO RETRY", 125, 330, 12, 255, 255, 255)
+    }
+
+    // Present Frame
+    PW::update_window(win, buffer)
+}
+
+PW::destroy_window(win)
+print("Galaga closed cleanly.")

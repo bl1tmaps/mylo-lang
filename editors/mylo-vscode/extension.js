@@ -5,25 +5,53 @@ const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
 
 let client;
 
-function activate(context) {
-    // Determine the path to the bundled binaries
-    const binDir = path.join(context.extensionPath, 'bin');
-    const myloExt = process.platform === 'win32' ? '.exe' : '';
-    
-    // CMake on Windows typically creates Debug/Release subdirectories
-    let myloPath = path.join(binDir, `mylo${myloExt}`);
-    let myloLspPath = path.join(binDir, `mylo-lsp${myloExt}`);
-    
-    if (!fs.existsSync(myloPath) && fs.existsSync(path.join(binDir, 'Debug', `mylo${myloExt}`))) {
-        myloPath = path.join(binDir, 'Debug', `mylo${myloExt}`);
-        myloLspPath = path.join(binDir, 'Debug', `mylo-lsp${myloExt}`);
-    } else if (!fs.existsSync(myloPath) && fs.existsSync(path.join(binDir, 'Release', `mylo${myloExt}`))) {
-        myloPath = path.join(binDir, 'Release', `mylo${myloExt}`);
-        myloLspPath = path.join(binDir, 'Release', `mylo-lsp${myloExt}`);
+function findBinary(name, configKey, context) {
+    const ext = process.platform === 'win32' ? '.exe' : '';
+    const fullName = `${name}${ext}`;
+
+    // 1. Check user/workspace configuration
+    const config = vscode.workspace.getConfiguration('mylo');
+    const configured = config.get(configKey);
+    if (configured && fs.existsSync(configured)) {
+        return configured;
     }
 
+    // 2. Check bundled extension bin/
+    const binDir = path.join(context.extensionPath, 'bin');
+    const candidates = [
+        path.join(binDir, fullName),
+        path.join(binDir, 'Debug', fullName),
+        path.join(binDir, 'Release', fullName)
+    ];
+
+    // 3. Check workspace build directories
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        const wsRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+        candidates.push(
+            path.join(wsRoot, 'build', fullName),
+            path.join(wsRoot, 'build', 'Debug', fullName),
+            path.join(wsRoot, 'build', 'Release', fullName),
+            path.join(wsRoot, 'cmake-build-debug', fullName),
+            path.join(wsRoot, 'cmake-build-release', fullName),
+            path.join(wsRoot, 'bin', fullName)
+        );
+    }
+
+    for (const candidate of candidates) {
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
+function activate(context) {
+    const myloPath = findBinary('mylo', 'path', context);
+    const myloLspPath = findBinary('mylo-lsp', 'lsp.path', context);
+
     // --- Language Server Setup ---
-    if (fs.existsSync(myloLspPath)) {
+    if (myloLspPath) {
         const serverOptions = {
             command: myloLspPath,
             args: [],
@@ -47,7 +75,7 @@ function activate(context) {
 
         client.start();
     } else {
-        vscode.window.showWarningMessage('Mylo Language Server executable not found in bin/. LSP will be disabled.');
+        vscode.window.showWarningMessage('Mylo Language Server (mylo-lsp) not found. Build the project or set "mylo.lsp.path" to enable LSP.');
     }
 
     // --- Debug Adapter Tracker for Logging ---

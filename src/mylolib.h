@@ -44,6 +44,8 @@ void std_list_min(VM *vm);
 void std_list_max(VM *vm);
 void std_filter(VM *vm);
 void std_param_filter(VM *vm);
+void std_any(VM *vm);
+void std_all(VM *vm);
 
 // Rand
 void std_seed(VM *vm);

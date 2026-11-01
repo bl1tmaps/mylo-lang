@@ -19,15 +19,25 @@ add_executable(tests tests/tests.cpp src/compiler.c src/vm.h src/vm.c
         src/debug_adapter.c
 )
 add_executable(mylo-vsproject tools/mylo-vsproject.cpp)
+add_executable(mylo-lsp lsp/mylo_lsp.c
+        src/compiler.c src/vm.h src/vm.c
+        src/utils.h src/utils.c
+        src/defines.h
+        src/mylolib.h src/mylolib.c
+        src/debug_adapter.c
+)
+target_include_directories(mylo-lsp PRIVATE src)
 IF (WIN32)
   # Math not needed on Windows
 
     target_link_libraries(mylo ws2_32)
     target_link_libraries(tests ws2_32)
+    target_link_libraries(mylo-lsp ws2_32)
 ELSE()
   # Math needed on other plats
     target_link_libraries(mylo m)
     target_link_libraries(tests m)
+    target_link_libraries(mylo-lsp m)
 ENDIF()
 
 set_target_properties(mylo PROPERTIES ENABLE_EXPORTS ON)

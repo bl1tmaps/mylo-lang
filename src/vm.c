@@ -47,6 +47,7 @@ const char *OP_NAMES[] = {
     "EMBED",
     "MAKE_ARR",
     "NEW_REG", "DEL_REG", "SET_CTX",
+    "NEW_ARENA_PUSH", "PUSH_CTX", "POP_CTX", "FREE_ARENA",
     "MONITOR",
     "CAST",
     "CHECK_TYPE",
@@ -63,6 +64,9 @@ void mylo_exit(int code) {
     if (MyloConfig.error_callback) {
         MyloConfig.error_callback("Mylo called `Exit()`");
     }
+    if (MyloConfig.repl_jmp_buf) {
+        longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
+    }
     exit(1);
 }
 
@@ -78,6 +82,9 @@ void mylo_runtime_error(VM* vm, const char* fmt, ...) {
     va_end(args);
     if (MyloConfig.debug_mode && MyloConfig.error_callback) {
         MyloConfig.error_callback(buffer);
+        if (MyloConfig.repl_jmp_buf) {
+            longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
+        }
         mylo_exit(1);
     }
 
@@ -639,12 +646,14 @@ void dbg_print_state_window(VM* vm) {
     // Globals
     printf(UI_BG_CONTENT UI_FG_GRAY "  -- Globals --" EXTEND UI_RST "\n");
     for (int i = 0; i < vm->global_symbol_count; i++) {
+        VMSymbol* sym = &vm->global_symbols[i];
+        if ((vm->ip - 1) < sym->start_ip || (sym->end_ip != -1 && (vm->ip - 1) > sym->end_ip)) continue;
         if (i > 5) {
             printf(UI_BG_CONTENT UI_FG_GRAY "    ... (%d more)" EXTEND UI_RST "\n", vm->global_symbol_count - 5);
             break;
         }
-        int addr = vm->global_symbols[i].addr;
-        printf(UI_BG_CONTENT UI_FG_WHITE "    %-12s: " UI_FG_ACCENT, vm->global_symbols[i].name);
+        int addr = sym->addr;
+        printf(UI_BG_CONTENT UI_FG_WHITE "    %-12s: " UI_FG_ACCENT, sym->name);
         print_recursive(vm, vm->globals[addr], vm->global_types[addr], 0, 1);
         printf(EXTEND UI_RST "\n");
     }
@@ -687,8 +696,9 @@ double* find_debug_var(VM* vm, char* name, int* out_type) {
     }
     // 2. Search Globals
     for (int i = 0; i < vm->global_symbol_count; i++) {
-        if (strcmp(vm->global_symbols[i].name, name) == 0) {
-            int addr = vm->global_symbols[i].addr;
+        VMSymbol* sym = &vm->global_symbols[i];
+        if (strcmp(sym->name, name) == 0 && (vm->ip - 1) >= sym->start_ip && (sym->end_ip == -1 || (vm->ip - 1) <= sym->end_ip)) {
+            int addr = sym->addr;
             if (out_type) *out_type = vm->global_types[addr];
             return &vm->globals[addr];
         }
@@ -805,6 +815,145 @@ void enter_debugger(VM* vm) {
 }
 
 // ... Logic Implementation ... (Math, etc unchanged) ...
+static inline double get_array_elem_value(double* base, int* types, int hType, int i, int* out_type) {
+    if (hType == TYPE_ARRAY) {
+        if (out_type && types) *out_type = types[HEAP_HEADER_ARRAY + i];
+        return base[HEAP_HEADER_ARRAY + i];
+    }
+    if (out_type) *out_type = T_NUM;
+    char* data = (char*)&base[HEAP_HEADER_ARRAY];
+    switch(hType) {
+        case TYPE_U8:
+        case TYPE_BYTES:
+        case TYPE_BOOL:
+        case TYPE_BOOL_ARRAY: return (double)((unsigned char*)data)[i];
+        case TYPE_I8:         return (double)((signed char*)data)[i];
+        case TYPE_U16:        return (double)((unsigned short*)data)[i];
+        case TYPE_I16:        return (double)((short*)data)[i];
+        case TYPE_F16:        return (double)((float)((short*)data)[i]);
+        case TYPE_U32:        return (double)((unsigned int*)data)[i];
+        case TYPE_I32:        return (double)((int*)data)[i];
+        case TYPE_F32:        return (double)((float*)data)[i];
+        case TYPE_U64:        return (double)((unsigned long long*)data)[i];
+        case TYPE_I64:        return (double)((long long*)data)[i];
+        case TYPE_F64:        return ((double*)data)[i];
+        default:              return ((double*)data)[i];
+    }
+}
+
+static void broadcast_compare(VM* vm, int op, double obj_val, double scalar_val, int scalar_type, bool obj_is_lhs) {
+    double* base = vm_resolve_ptr(vm, obj_val);
+    int* types = vm_resolve_type(vm, obj_val);
+    int hType = (int)base[0];
+    int len = (int)base[1];
+
+    int elem_size = get_type_size(TYPE_BOOL_ARRAY);
+    int doubles_needed = (len * elem_size + 7) / 8;
+    double newPtr = heap_alloc(vm, doubles_needed + HEAP_HEADER_ARRAY);
+    double* newBase = vm_resolve_ptr(vm, newPtr);
+    base = vm_resolve_ptr(vm, obj_val);
+    types = vm_resolve_type(vm, obj_val);
+
+    newBase[0] = (double)TYPE_BOOL_ARRAY;
+    newBase[1] = (double)len;
+    unsigned char* dst = (unsigned char*)&newBase[HEAP_HEADER_ARRAY];
+
+    for(int i = 0; i < len; i++) {
+        int elType = T_NUM;
+        double el = get_array_elem_value(base, types, hType, i, &elType);
+
+        bool cmp_res = false;
+        if (scalar_type == T_STR && elType == T_STR) {
+            const char* s_lhs = vm->string_pool[(int)(obj_is_lhs ? el : scalar_val)];
+            const char* s_rhs = vm->string_pool[(int)(obj_is_lhs ? scalar_val : el)];
+            int cmp = strcmp(s_lhs, s_rhs);
+            switch(op) {
+                case OP_LT:  cmp_res = (cmp < 0); break;
+                case OP_GT:  cmp_res = (cmp > 0); break;
+                case OP_LE:  cmp_res = (cmp <= 0); break;
+                case OP_GE:  cmp_res = (cmp >= 0); break;
+                case OP_EQ:  cmp_res = (cmp == 0); break;
+                case OP_NEQ: cmp_res = (cmp != 0); break;
+            }
+        } else {
+            double lhs = obj_is_lhs ? el : scalar_val;
+            double rhs = obj_is_lhs ? scalar_val : el;
+            switch(op) {
+                case OP_LT:  cmp_res = (lhs < rhs); break;
+                case OP_GT:  cmp_res = (lhs > rhs); break;
+                case OP_LE:  cmp_res = (lhs <= rhs); break;
+                case OP_GE:  cmp_res = (lhs >= rhs); break;
+                case OP_EQ:  cmp_res = (lhs == rhs); break;
+                case OP_NEQ: cmp_res = (lhs != rhs); break;
+            }
+        }
+        dst[i] = cmp_res ? 1 : 0;
+    }
+    vm_push(vm, newPtr, T_OBJ);
+}
+
+static void broadcast_compare_arrays(VM* vm, int op, double a_val, double b_val) {
+    double* pa = vm_resolve_ptr(vm, a_val);
+    double* pb = vm_resolve_ptr(vm, b_val);
+    int* typesA = vm_resolve_type(vm, a_val);
+    int* typesB = vm_resolve_type(vm, b_val);
+    int typeA = (int)pa[0];
+    int typeB = (int)pb[0];
+    int lenA = (int)pa[1];
+    int lenB = (int)pb[1];
+
+    if (lenA != lenB) {
+        if (op == OP_EQ) { vm_push(vm, 0.0, T_NUM); return; }
+        if (op == OP_NEQ) { vm_push(vm, 1.0, T_NUM); return; }
+        RUNTIME_ERROR("Cannot compare arrays of different lengths");
+    }
+
+    int elem_size = get_type_size(TYPE_BOOL_ARRAY);
+    int doubles_needed = (lenA * elem_size + 7) / 8;
+    double newPtr = heap_alloc(vm, doubles_needed + HEAP_HEADER_ARRAY);
+    double* newBase = vm_resolve_ptr(vm, newPtr);
+    pa = vm_resolve_ptr(vm, a_val);
+    pb = vm_resolve_ptr(vm, b_val);
+    typesA = vm_resolve_type(vm, a_val);
+    typesB = vm_resolve_type(vm, b_val);
+
+    newBase[0] = (double)TYPE_BOOL_ARRAY;
+    newBase[1] = (double)lenA;
+    unsigned char* dst = (unsigned char*)&newBase[HEAP_HEADER_ARRAY];
+
+    for(int i = 0; i < lenA; i++) {
+        int elTypeA = T_NUM, elTypeB = T_NUM;
+        double elA = get_array_elem_value(pa, typesA, typeA, i, &elTypeA);
+        double elB = get_array_elem_value(pb, typesB, typeB, i, &elTypeB);
+
+        bool cmp_res = false;
+        if (elTypeA == T_STR && elTypeB == T_STR) {
+            const char* s_lhs = vm->string_pool[(int)elA];
+            const char* s_rhs = vm->string_pool[(int)elB];
+            int cmp = strcmp(s_lhs, s_rhs);
+            switch(op) {
+                case OP_LT:  cmp_res = (cmp < 0); break;
+                case OP_GT:  cmp_res = (cmp > 0); break;
+                case OP_LE:  cmp_res = (cmp <= 0); break;
+                case OP_GE:  cmp_res = (cmp >= 0); break;
+                case OP_EQ:  cmp_res = (cmp == 0); break;
+                case OP_NEQ: cmp_res = (cmp != 0); break;
+            }
+        } else {
+            switch(op) {
+                case OP_LT:  cmp_res = (elA < elB); break;
+                case OP_GT:  cmp_res = (elA > elB); break;
+                case OP_LE:  cmp_res = (elA <= elB); break;
+                case OP_GE:  cmp_res = (elA >= elB); break;
+                case OP_EQ:  cmp_res = (elA == elB); break;
+                case OP_NEQ: cmp_res = (elA != elB); break;
+            }
+        }
+        dst[i] = cmp_res ? 1 : 0;
+    }
+    vm_push(vm, newPtr, T_OBJ);
+}
+
 static void broadcast_math(VM* vm, int op, double obj_val, double scalar_val, int scalar_type, bool obj_is_lhs) {
     double* base = vm_resolve_ptr(vm, obj_val);
     int* types = vm_resolve_type(vm, obj_val);
@@ -1062,6 +1211,39 @@ static void exec_compare_op(VM* vm, int op) {
     CHECK_STACK(2);
     double b = vm_pop(vm); int tb = vm->stack_types[vm->sp + 1];
     double a = vm->stack[vm->sp]; int ta = vm->stack_types[vm->sp];
+
+    if (ta == T_OBJ && tb == T_OBJ) {
+        double* pa = vm_resolve_ptr_safe(vm, a);
+        double* pb = vm_resolve_ptr_safe(vm, b);
+        if (pa && pb) {
+            int typeA = (int)pa[0];
+            int typeB = (int)pb[0];
+            bool isArrA = (typeA <= TYPE_ARRAY && typeA != TYPE_MAP && typeA != TYPE_STRUCT && typeA != TYPE_ENUM);
+            bool isArrB = (typeB <= TYPE_ARRAY && typeB != TYPE_MAP && typeB != TYPE_STRUCT && typeB != TYPE_ENUM);
+            if (isArrA && isArrB) {
+                vm_pop(vm);
+                broadcast_compare_arrays(vm, op, a, b);
+                return;
+            }
+        }
+    }
+
+    if (ta == T_OBJ || tb == T_OBJ) {
+        double arrVal = (ta == T_OBJ) ? a : b;
+        double scalVal = (ta == T_OBJ) ? b : a;
+        int scalType = (ta == T_OBJ) ? tb : ta;
+        bool objIsLhs = (ta == T_OBJ);
+        double* pa = vm_resolve_ptr_safe(vm, arrVal);
+        if (pa) {
+            int typeA = (int)pa[0];
+            bool isArr = (typeA <= TYPE_ARRAY && typeA != TYPE_MAP && typeA != TYPE_STRUCT && typeA != TYPE_ENUM);
+            if (isArr) {
+                vm_pop(vm);
+                broadcast_compare(vm, op, arrVal, scalVal, scalType, objIsLhs);
+                return;
+            }
+        }
+    }
     
     // Extract integer if comparing enums
     double val_a = (ta == T_ENUM) ? (double)((unsigned long long)a & 0xFFFF) : a;
@@ -1610,15 +1792,23 @@ static void exec_monitor(VM* vm) {
 
     printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "  Arenas" EXTEND UI_RST "\n");
     printf("  Current Arena: %d, Head: %d / %d\n", vm->current_arena, vm->arenas[vm->current_arena].head, vm->arenas[vm->current_arena].capacity);
+    for (int i = 1; i < MAX_ARENAS; i++) {
+        if (vm->arenas[i].active && i != vm->current_arena) {
+            printf("  Arena %d: Head: %d / %d\n", i, vm->arenas[i].head, vm->arenas[i].capacity);
+        }
+    }
 
     //printf("\n--- Globals ---\n");
     printf(UI_BG_CONTENT UI_BOLD UI_FG_GRAY "\n   Globals" EXTEND UI_RST "\n");
     if (vm->global_symbols) {
         for (int i = 0; i < vm->global_symbol_count; i++) {
-            int addr = vm->global_symbols[i].addr;
-            printf("  %s: ", vm->global_symbols[i].name);
-            print_recursive(vm, vm->globals[addr], vm->global_types[addr], 0, MYLO_MONITOR_DEPTH);
-            printf("\n");
+            VMSymbol* sym = &vm->global_symbols[i];
+            if ((vm->ip - 1) >= sym->start_ip && (sym->end_ip == -1 || (vm->ip - 1) <= sym->end_ip)) {
+                int addr = sym->addr;
+                printf("  %s: ", sym->name);
+                print_recursive(vm, vm->globals[addr], vm->global_types[addr], 0, MYLO_MONITOR_DEPTH);
+                printf("\n");
+            }
         }
     }
 
@@ -1952,6 +2142,42 @@ int vm_step(VM* vm, bool debug_trace) {
             }
             break;
         }
+        case OP_NEW_ARENA_PUSH: {
+            int id = -1;
+            for (int i = 1; i < MAX_ARENAS; i++) {
+                if (!vm->arenas[i].active) { id = i; break; }
+            }
+            if (id == -1) RUNTIME_ERROR("Max Regions Reached");
+            init_arena(vm, id);
+            vm_push(vm, (double)id, T_NUM);
+            break;
+        }
+        case OP_PUSH_CTX: {
+            if (vm->arena_sp < MAX_ARENAS) {
+                vm->arena_stack[vm->arena_sp++] = vm->current_arena;
+            }
+            break;
+        }
+        case OP_POP_CTX: {
+            if (vm->arena_sp > 0) {
+                vm->current_arena = vm->arena_stack[--vm->arena_sp];
+            } else {
+                vm->current_arena = 0;
+            }
+            break;
+        }
+        case OP_FREE_ARENA: {
+            CHECK_STACK(1);
+            int id = (int)vm_pop(vm);
+            if (id > 0 && id < MAX_ARENAS) {
+                free_arena(vm, id);
+                if (vm->current_arena == id) {
+                    if (vm->arena_sp > 0) vm->current_arena = vm->arena_stack[--vm->arena_sp];
+                    else vm->current_arena = 0;
+                }
+            }
+            break;
+        }
         case OP_MONITOR: exec_monitor(vm); break;
 
         case OP_CAST: {
@@ -2110,121 +2336,7 @@ void run_vm(VM* vm, bool debug_trace) {
     run_vm_from(vm, 0, debug_trace);
 }
 
-// =========================================================
-// [NEW] Standalone Loader Implementation
-// =========================================================
 
-typedef void (*BindFunc)(VM *, int, MyloAPI *);
-
-bool load_self_contained(VM* vm, const char* exe_path) {
-    FILE* f = fopen(exe_path, "rb");
-    if (!f) return false;
-
-    // Check Footer
-    fseek(f, -((long)sizeof(StandaloneFooter)), SEEK_END);
-    StandaloneFooter footer;
-    if (fread(&footer, sizeof(StandaloneFooter), 1, f) != 1) { fclose(f); return false; }
-    if (strcmp(footer.magic, MYLO_MAGIC) != 0) { fclose(f); return false; }
-
-    long total_payload_size = footer.bytecode_size + footer.const_size + footer.string_size + footer.dependency_size + footer.symbol_size + footer.function_size;
-    fseek(f, -(total_payload_size + (long)sizeof(StandaloneFooter)), SEEK_END);
-
-    // 1. Read Bytecode
-    vm->code_size = footer.bytecode_size / sizeof(int);
-    fread(vm->bytecode, sizeof(int), vm->code_size, f);
-
-    // 2. Read Constants
-    vm->const_count = footer.const_size / sizeof(double);
-    fread(vm->constants, sizeof(double), vm->const_count, f);
-
-    // 3. Read Strings
-    vm->str_count = footer.string_size / MAX_STRING_LENGTH;
-    fread(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, f);
-
-    // 4. Read Dependencies (Store in temporary memory so we can read symbols next)
-    int dep_count = footer.dependency_size / sizeof(Dependency);
-    Dependency* deps = NULL;
-    if (dep_count > 0) {
-        deps = malloc(footer.dependency_size);
-        fread(deps, sizeof(Dependency), dep_count, f);
-    }
-
-    // 5. Read Symbols sequentially!
-    int symbol_count = footer.symbol_size / sizeof(VMSymbol);
-    vm->global_symbol_count = symbol_count;
-    vm->global_symbols = malloc(footer.symbol_size);
-    fread(vm->global_symbols, sizeof(VMSymbol), symbol_count, f);
-
-    // --- [NEW] 5b. Read Functions sequentially! ---
-    int func_count = footer.function_size / sizeof(VMFunction);
-    vm->function_count = func_count;
-    fread(vm->functions, sizeof(VMFunction), func_count, f);
-
-    // 6. Bind Dependencies
-    if (dep_count > 0) {
-        // Prepare API for binding
-        MyloAPI api;
-        api.push = vm_push;
-        api.pop = vm_pop;
-        api.make_string = make_string;
-        api.heap_alloc = heap_alloc;
-        api.resolve_ptr = vm_resolve_ptr;
-        api.store_copy = vm_store_copy;
-        api.store_ptr = vm_store_ptr;
-        api.get_ref = vm_get_ref;
-        api.free_ref = vm_free_ref;
-        api.natives_array = vm->natives;
-        api.string_pool = vm->string_pool;
-        api.find_function = vm_find_function;
-        api.exec_vm_from = run_vm_from;
-
-        for (int i = 0; i < dep_count; i++) {
-            printf("Loading ... %s\n", deps[i].name);
-            void* lib = load_library(deps[i].name);
-
-            if (!lib) {
-                char exe_path[1024];
-                const char* clean_name = deps[i].name;
-
-                // Strip the "./" prefix injected by get_lib_name on Unix systems
-                if (strncmp(clean_name, "./", 2) == 0) clean_name += 2;
-
-                snprintf(exe_path, sizeof(exe_path), "%s/%s", mylo_exe_dir, clean_name);
-                lib = load_library(exe_path);
-            }
-            
-            if (!lib) {
-                char *pathvar;
-                pathvar = getenv("MYLO_LIBS");
-                printf("MYLO_LIBS=%s",pathvar);
-                if (pathvar && (strlen(deps[i].name) > 3)) {
-                    char pathbind[1024] = "";
-                    strcat(pathbind,pathvar);
-                    strcat(pathbind,deps[i].name + 2);
-                    printf("Attempting to load from MYLO_LIBS (%s)\n", pathvar); 
-                    lib = load_library(pathbind);
-                }
-            }
-
-            if (!lib) {
-                printf("Runtime Error: Could not load dependency '%s'\n", deps[i].name);
-                exit(1);
-            }
-
-            BindFunc binder = (BindFunc)get_symbol(lib, "mylo_bind_lib");
-            if (!binder) {
-                printf("Runtime Error: Library '%s' is not a valid Mylo module.\n", deps[i].name);
-                exit(1);
-            }
-
-            binder(vm, deps[i].start_index, &api);
-        }
-        free(deps);
-    }
-
-    fclose(f);
-    return true;
-}
 
 void get_lib_name(char* out, const char* base_name) {
     char temp[1024];
