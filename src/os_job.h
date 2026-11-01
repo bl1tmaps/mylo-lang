@@ -16,14 +16,15 @@
 static int mutex_initialized = 0;
 #define LOCK_JOBS if(!mutex_initialized) { InitializeCriticalSection(&job_mutex); mutex_initialized=1; } EnterCriticalSection(&job_mutex)
 #define UNLOCK_JOBS LeaveCriticalSection(&job_mutex)
-#elif defined(__AMIGA__)
+#elif defined(__AMIGA__) || defined(__amigaos__)
+    #include <stdio.h>
     #include <unistd.h>
-    #define popen(c, m) NULL
+    #include <sys/types.h>
+    #define popen(c, m) ((FILE*)NULL)
     #define pclose(f) (-1)
     #define SLEEP_MS(x) usleep((x)*1000)
     #define LOCK_JOBS
     #define UNLOCK_JOBS
-    typedef int pthread_t;
 #else
 #include <pthread.h>
 #include <unistd.h>
