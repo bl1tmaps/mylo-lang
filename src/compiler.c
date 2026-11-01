@@ -11,7 +11,7 @@
 #include "defines.h"
 #include "compiler.h"
 #include <setjmp.h>
-
+#include <stdint.h>
 // --- Tokenizer & Structures ---
 
 typedef enum {
