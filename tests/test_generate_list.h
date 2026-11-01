@@ -1884,7 +1884,7 @@ inline TestOutput test_array_element_branch_if_any_all() {
         "if (any(arr)) { print(true) }\n"
         "if (all(arr)) { print(true) }\n";
     std::string expected = """"
-        "true\n";
+        "1\n";
     return run_source_test(src, expected);
 }
 

@@ -2581,6 +2581,86 @@ void std_param_filter(VM *vm) {
   vm_push(vm, res_ptr, T_OBJ);
 }
 
+void std_any(VM *vm) {
+  double val = vm_pop(vm);
+  int t = vm->stack_types[vm->sp + 1];
+
+  if (t == T_OBJ) {
+    double *base = vm_resolve_ptr(vm, val);
+    int *types = vm_resolve_type(vm, val);
+    if (!base) {
+      vm_push(vm, 0.0, T_NUM);
+      return;
+    }
+    int objType = (int)base[HEAP_OFFSET_TYPE];
+    if (is_any_array_type(objType)) {
+      int len = (int)base[HEAP_OFFSET_LEN];
+      for (int i = 0; i < len; i++) {
+        int et = T_NUM;
+        double el = get_array_element(base, types, objType, i, &et);
+        bool truthy = false;
+        if (et == T_STR) {
+          const char *s = get_str(vm, el);
+          truthy = (s && s[0] != '\0');
+        } else {
+          truthy = (el != 0.0);
+        }
+        if (truthy) {
+          vm_push(vm, 1.0, T_NUM);
+          return;
+        }
+      }
+      vm_push(vm, 0.0, T_NUM);
+      return;
+    }
+  } else if (t == T_STR) {
+    const char *s = get_str(vm, val);
+    vm_push(vm, (s && s[0] != '\0') ? 1.0 : 0.0, T_NUM);
+    return;
+  }
+  vm_push(vm, (val != 0.0) ? 1.0 : 0.0, T_NUM);
+}
+
+void std_all(VM *vm) {
+  double val = vm_pop(vm);
+  int t = vm->stack_types[vm->sp + 1];
+
+  if (t == T_OBJ) {
+    double *base = vm_resolve_ptr(vm, val);
+    int *types = vm_resolve_type(vm, val);
+    if (!base) {
+      vm_push(vm, 0.0, T_NUM);
+      return;
+    }
+    int objType = (int)base[HEAP_OFFSET_TYPE];
+    if (is_any_array_type(objType)) {
+      int len = (int)base[HEAP_OFFSET_LEN];
+      for (int i = 0; i < len; i++) {
+        int et = T_NUM;
+        double el = get_array_element(base, types, objType, i, &et);
+        bool truthy = false;
+        if (et == T_STR) {
+          const char *s = get_str(vm, el);
+          truthy = (s && s[0] != '\0');
+        } else {
+          truthy = (el != 0.0);
+        }
+        if (!truthy) {
+          vm_push(vm, 0.0, T_NUM);
+          return;
+        }
+      }
+      vm_push(vm, 1.0, T_NUM);
+      return;
+    }
+  } else if (t == T_STR) {
+    const char *s = get_str(vm, val);
+    vm_push(vm, (s && s[0] != '\0') ? 1.0 : 0.0, T_NUM);
+    return;
+  }
+  vm_push(vm, (val != 0.0) ? 1.0 : 0.0, T_NUM);
+}
+
 void std_clock(VM *vm) {
 #ifdef _WIN32
   static LARGE_INTEGER freq;
@@ -2912,6 +2992,8 @@ const StdLibDef std_library[] = {
     {"function_exists", std_function_exists, "num", 1, {"str"}},
     {"filter", std_filter, "arr", 2, {"arr", "str"}},
     {"param_filter", std_param_filter, "arr", 3, {"arr", "str", "any"}},
+    {"any", std_any, "num", 1, {"any"}},
+    {"all", std_all, "num", 1, {"any"}},
     {"clock", std_clock, "num", 0, {NULL}},
     {"abs", std_abs, "num", 1, {"num"}},
     {"clamp", std_clamp, "num", 3, {"num", "num", "num"}},

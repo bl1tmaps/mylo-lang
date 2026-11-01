@@ -813,6 +813,145 @@ void enter_debugger(VM* vm) {
 }
 
 // ... Logic Implementation ... (Math, etc unchanged) ...
+static inline double get_array_elem_value(double* base, int* types, int hType, int i, int* out_type) {
+    if (hType == TYPE_ARRAY) {
+        if (out_type && types) *out_type = types[HEAP_HEADER_ARRAY + i];
+        return base[HEAP_HEADER_ARRAY + i];
+    }
+    if (out_type) *out_type = T_NUM;
+    char* data = (char*)&base[HEAP_HEADER_ARRAY];
+    switch(hType) {
+        case TYPE_U8:
+        case TYPE_BYTES:
+        case TYPE_BOOL:
+        case TYPE_BOOL_ARRAY: return (double)((unsigned char*)data)[i];
+        case TYPE_I8:         return (double)((signed char*)data)[i];
+        case TYPE_U16:        return (double)((unsigned short*)data)[i];
+        case TYPE_I16:        return (double)((short*)data)[i];
+        case TYPE_F16:        return (double)((float)((short*)data)[i]);
+        case TYPE_U32:        return (double)((unsigned int*)data)[i];
+        case TYPE_I32:        return (double)((int*)data)[i];
+        case TYPE_F32:        return (double)((float*)data)[i];
+        case TYPE_U64:        return (double)((unsigned long long*)data)[i];
+        case TYPE_I64:        return (double)((long long*)data)[i];
+        case TYPE_F64:        return ((double*)data)[i];
+        default:              return ((double*)data)[i];
+    }
+}
+
+static void broadcast_compare(VM* vm, int op, double obj_val, double scalar_val, int scalar_type, bool obj_is_lhs) {
+    double* base = vm_resolve_ptr(vm, obj_val);
+    int* types = vm_resolve_type(vm, obj_val);
+    int hType = (int)base[0];
+    int len = (int)base[1];
+
+    int elem_size = get_type_size(TYPE_BOOL_ARRAY);
+    int doubles_needed = (len * elem_size + 7) / 8;
+    double newPtr = heap_alloc(vm, doubles_needed + HEAP_HEADER_ARRAY);
+    double* newBase = vm_resolve_ptr(vm, newPtr);
+    base = vm_resolve_ptr(vm, obj_val);
+    types = vm_resolve_type(vm, obj_val);
+
+    newBase[0] = (double)TYPE_BOOL_ARRAY;
+    newBase[1] = (double)len;
+    unsigned char* dst = (unsigned char*)&newBase[HEAP_HEADER_ARRAY];
+
+    for(int i = 0; i < len; i++) {
+        int elType = T_NUM;
+        double el = get_array_elem_value(base, types, hType, i, &elType);
+
+        bool cmp_res = false;
+        if (scalar_type == T_STR && elType == T_STR) {
+            const char* s_lhs = vm->string_pool[(int)(obj_is_lhs ? el : scalar_val)];
+            const char* s_rhs = vm->string_pool[(int)(obj_is_lhs ? scalar_val : el)];
+            int cmp = strcmp(s_lhs, s_rhs);
+            switch(op) {
+                case OP_LT:  cmp_res = (cmp < 0); break;
+                case OP_GT:  cmp_res = (cmp > 0); break;
+                case OP_LE:  cmp_res = (cmp <= 0); break;
+                case OP_GE:  cmp_res = (cmp >= 0); break;
+                case OP_EQ:  cmp_res = (cmp == 0); break;
+                case OP_NEQ: cmp_res = (cmp != 0); break;
+            }
+        } else {
+            double lhs = obj_is_lhs ? el : scalar_val;
+            double rhs = obj_is_lhs ? scalar_val : el;
+            switch(op) {
+                case OP_LT:  cmp_res = (lhs < rhs); break;
+                case OP_GT:  cmp_res = (lhs > rhs); break;
+                case OP_LE:  cmp_res = (lhs <= rhs); break;
+                case OP_GE:  cmp_res = (lhs >= rhs); break;
+                case OP_EQ:  cmp_res = (lhs == rhs); break;
+                case OP_NEQ: cmp_res = (lhs != rhs); break;
+            }
+        }
+        dst[i] = cmp_res ? 1 : 0;
+    }
+    vm_push(vm, newPtr, T_OBJ);
+}
+
+static void broadcast_compare_arrays(VM* vm, int op, double a_val, double b_val) {
+    double* pa = vm_resolve_ptr(vm, a_val);
+    double* pb = vm_resolve_ptr(vm, b_val);
+    int* typesA = vm_resolve_type(vm, a_val);
+    int* typesB = vm_resolve_type(vm, b_val);
+    int typeA = (int)pa[0];
+    int typeB = (int)pb[0];
+    int lenA = (int)pa[1];
+    int lenB = (int)pb[1];
+
+    if (lenA != lenB) {
+        if (op == OP_EQ) { vm_push(vm, 0.0, T_NUM); return; }
+        if (op == OP_NEQ) { vm_push(vm, 1.0, T_NUM); return; }
+        RUNTIME_ERROR("Cannot compare arrays of different lengths");
+    }
+
+    int elem_size = get_type_size(TYPE_BOOL_ARRAY);
+    int doubles_needed = (lenA * elem_size + 7) / 8;
+    double newPtr = heap_alloc(vm, doubles_needed + HEAP_HEADER_ARRAY);
+    double* newBase = vm_resolve_ptr(vm, newPtr);
+    pa = vm_resolve_ptr(vm, a_val);
+    pb = vm_resolve_ptr(vm, b_val);
+    typesA = vm_resolve_type(vm, a_val);
+    typesB = vm_resolve_type(vm, b_val);
+
+    newBase[0] = (double)TYPE_BOOL_ARRAY;
+    newBase[1] = (double)lenA;
+    unsigned char* dst = (unsigned char*)&newBase[HEAP_HEADER_ARRAY];
+
+    for(int i = 0; i < lenA; i++) {
+        int elTypeA = T_NUM, elTypeB = T_NUM;
+        double elA = get_array_elem_value(pa, typesA, typeA, i, &elTypeA);
+        double elB = get_array_elem_value(pb, typesB, typeB, i, &elTypeB);
+
+        bool cmp_res = false;
+        if (elTypeA == T_STR && elTypeB == T_STR) {
+            const char* s_lhs = vm->string_pool[(int)elA];
+            const char* s_rhs = vm->string_pool[(int)elB];
+            int cmp = strcmp(s_lhs, s_rhs);
+            switch(op) {
+                case OP_LT:  cmp_res = (cmp < 0); break;
+                case OP_GT:  cmp_res = (cmp > 0); break;
+                case OP_LE:  cmp_res = (cmp <= 0); break;
+                case OP_GE:  cmp_res = (cmp >= 0); break;
+                case OP_EQ:  cmp_res = (cmp == 0); break;
+                case OP_NEQ: cmp_res = (cmp != 0); break;
+            }
+        } else {
+            switch(op) {
+                case OP_LT:  cmp_res = (elA < elB); break;
+                case OP_GT:  cmp_res = (elA > elB); break;
+                case OP_LE:  cmp_res = (elA <= elB); break;
+                case OP_GE:  cmp_res = (elA >= elB); break;
+                case OP_EQ:  cmp_res = (elA == elB); break;
+                case OP_NEQ: cmp_res = (elA != elB); break;
+            }
+        }
+        dst[i] = cmp_res ? 1 : 0;
+    }
+    vm_push(vm, newPtr, T_OBJ);
+}
+
 static void broadcast_math(VM* vm, int op, double obj_val, double scalar_val, int scalar_type, bool obj_is_lhs) {
     double* base = vm_resolve_ptr(vm, obj_val);
     int* types = vm_resolve_type(vm, obj_val);
@@ -1070,6 +1209,39 @@ static void exec_compare_op(VM* vm, int op) {
     CHECK_STACK(2);
     double b = vm_pop(vm); int tb = vm->stack_types[vm->sp + 1];
     double a = vm->stack[vm->sp]; int ta = vm->stack_types[vm->sp];
+
+    if (ta == T_OBJ && tb == T_OBJ) {
+        double* pa = vm_resolve_ptr_safe(vm, a);
+        double* pb = vm_resolve_ptr_safe(vm, b);
+        if (pa && pb) {
+            int typeA = (int)pa[0];
+            int typeB = (int)pb[0];
+            bool isArrA = (typeA <= TYPE_ARRAY && typeA != TYPE_MAP && typeA != TYPE_STRUCT && typeA != TYPE_ENUM);
+            bool isArrB = (typeB <= TYPE_ARRAY && typeB != TYPE_MAP && typeB != TYPE_STRUCT && typeB != TYPE_ENUM);
+            if (isArrA && isArrB) {
+                vm_pop(vm);
+                broadcast_compare_arrays(vm, op, a, b);
+                return;
+            }
+        }
+    }
+
+    if (ta == T_OBJ || tb == T_OBJ) {
+        double arrVal = (ta == T_OBJ) ? a : b;
+        double scalVal = (ta == T_OBJ) ? b : a;
+        int scalType = (ta == T_OBJ) ? tb : ta;
+        bool objIsLhs = (ta == T_OBJ);
+        double* pa = vm_resolve_ptr_safe(vm, arrVal);
+        if (pa) {
+            int typeA = (int)pa[0];
+            bool isArr = (typeA <= TYPE_ARRAY && typeA != TYPE_MAP && typeA != TYPE_STRUCT && typeA != TYPE_ENUM);
+            if (isArr) {
+                vm_pop(vm);
+                broadcast_compare(vm, op, arrVal, scalVal, scalType, objIsLhs);
+                return;
+            }
+        }
+    }
     
     // Extract integer if comparing enums
     double val_a = (ta == T_ENUM) ? (double)((unsigned long long)a & 0xFFFF) : a;
