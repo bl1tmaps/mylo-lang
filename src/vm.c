@@ -62,6 +62,9 @@ void mylo_exit(int code) {
     if (MyloConfig.error_callback) {
         MyloConfig.error_callback("Mylo called `Exit()`");
     }
+    if (MyloConfig.repl_jmp_buf) {
+        longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
+    }
     exit(1);
 }
 
@@ -77,6 +80,9 @@ void mylo_runtime_error(VM* vm, const char* fmt, ...) {
     va_end(args);
     if (MyloConfig.debug_mode && MyloConfig.error_callback) {
         MyloConfig.error_callback(buffer);
+        if (MyloConfig.repl_jmp_buf) {
+            longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
+        }
         mylo_exit(1);
     }
 
