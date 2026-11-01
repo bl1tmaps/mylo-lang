@@ -21,41 +21,49 @@
 extern "C" {
 #endif
 
+#ifndef TD_EXPORT
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+#define TD_EXPORT __declspec(dllexport)
+#else
+#define TD_EXPORT
+#endif
+#endif
+
 // Safely plots a single pixel to the RGB buffer.
-void td_draw_pixel(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t r, intptr_t g, intptr_t b);
+TD_EXPORT void td_draw_pixel(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t r, intptr_t g, intptr_t b);
 
 // Draws a line using Bresenham's algorithm. Thickness > 1 uses a square-brush technique.
-void td_draw_line(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x0, intptr_t y0, intptr_t x1, intptr_t y1, intptr_t thickness, intptr_t r, intptr_t g, intptr_t b);
+TD_EXPORT void td_draw_line(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x0, intptr_t y0, intptr_t x1, intptr_t y1, intptr_t thickness, intptr_t r, intptr_t g, intptr_t b);
 
 // Draws a rectangle. If not filled, uses lines for the border based on thickness.
-void td_draw_rect(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t w, intptr_t h, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b);
+TD_EXPORT void td_draw_rect(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t w, intptr_t h, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b);
 
 // Draws a circle. Filled and thick circles use a distance-squared bounding box (fast on MCUs).
-void td_draw_circle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t cx, intptr_t cy, intptr_t radius, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b);
+TD_EXPORT void td_draw_circle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t cx, intptr_t cy, intptr_t radius, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b);
 
 // Draws a triangle. Filled triangles use integer barycentric coordinates.
-void td_draw_triangle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x1, intptr_t y1, intptr_t x2, intptr_t y2, intptr_t x3, intptr_t y3, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b);
+TD_EXPORT void td_draw_triangle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x1, intptr_t y1, intptr_t x2, intptr_t y2, intptr_t x3, intptr_t y3, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b);
 
 // Fast sprite blitting with optional color-key transparency (key_r < 0 disables chromakey)
-void td_blit_sprite(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+TD_EXPORT void td_blit_sprite(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
                     const uint8_t* src, intptr_t src_w, intptr_t src_h,
                     intptr_t dx, intptr_t dy,
                     intptr_t key_r, intptr_t key_g, intptr_t key_b);
 
 // Blit a sub-rectangle of an RGB sprite (e.g. sprite sheet or tileset) with optional chromakey
-void td_blit_subimage(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+TD_EXPORT void td_blit_subimage(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
                       const uint8_t* src, intptr_t src_w, intptr_t src_h,
                       intptr_t dx, intptr_t dy,
                       intptr_t sx, intptr_t sy, intptr_t sw, intptr_t sh,
                       intptr_t key_r, intptr_t key_g, intptr_t key_b);
 
 // Fast RGBA sprite blitting with alpha blending
-void td_blit_sprite_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+TD_EXPORT void td_blit_sprite_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
                          const uint8_t* src, intptr_t src_w, intptr_t src_h,
                          intptr_t dx, intptr_t dy);
 
 // Sub-rectangle RGBA blit with alpha blending
-void td_blit_subimage_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+TD_EXPORT void td_blit_subimage_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
                            const uint8_t* src, intptr_t src_w, intptr_t src_h,
                            intptr_t dx, intptr_t dy,
                            intptr_t sx, intptr_t sy, intptr_t sw, intptr_t sh);
@@ -78,7 +86,7 @@ void td_blit_subimage_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
 #define TD__MIN(a, b) ((a) < (b) ? (a) : (b))
 #define TD__MAX(a, b) ((a) > (b) ? (a) : (b))
 
-void td_draw_pixel(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t r, intptr_t g, intptr_t b) {
+TD_EXPORT void td_draw_pixel(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t r, intptr_t g, intptr_t b) {
     if (x < 0 || x >= buf_width || y < 0 || y >= buf_height) return;
     int idx = (y * buf_width + x) * 3;
     buffer[idx] = (uint8_t)r;
@@ -86,7 +94,7 @@ void td_draw_pixel(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, int
     buffer[idx + 2] = (uint8_t)b;
 }
 
-void td_draw_line(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x0, intptr_t y0, intptr_t x1, intptr_t y1, intptr_t thickness, intptr_t r, intptr_t g, intptr_t b) {
+TD_EXPORT void td_draw_line(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x0, intptr_t y0, intptr_t x1, intptr_t y1, intptr_t thickness, intptr_t r, intptr_t g, intptr_t b) {
     int dx = abs((int)(x1 - x0)), sx = x0 < x1 ? 1 : -1;
     int dy = -abs((int)(y1 - y0)), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy, e2;
@@ -112,7 +120,7 @@ void td_draw_line(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intp
     }
 }
 
-void td_draw_rect(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t w, intptr_t h, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b) {
+TD_EXPORT void td_draw_rect(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x, intptr_t y, intptr_t w, intptr_t h, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b) {
     if (filled) {
         for (int py = y; py < y + h; py++) {
             for (int px = x; px < x + w; px++) {
@@ -129,7 +137,7 @@ void td_draw_rect(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intp
     }
 }
 
-void td_draw_circle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t cx, intptr_t cy, intptr_t radius, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b) {
+TD_EXPORT void td_draw_circle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t cx, intptr_t cy, intptr_t radius, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b) {
     if (filled || thickness > 1) {
         // Distance-squared bounding box approach (Very compact and integer-only)
         int r_out = radius + thickness / 2;
@@ -176,7 +184,7 @@ void td_draw_circle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, in
     }
 }
 
-void td_draw_triangle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x1, intptr_t y1, intptr_t x2, intptr_t y2, intptr_t x3, intptr_t y3, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b) {
+TD_EXPORT void td_draw_triangle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, intptr_t x1, intptr_t y1, intptr_t x2, intptr_t y2, intptr_t x3, intptr_t y3, intptr_t thickness, intptr_t filled, intptr_t r, intptr_t g, intptr_t b) {
     if (filled) {
         // Integer Barycentric bounding box
         int minX = TD__MIN(x1, TD__MIN(x2, x3));
@@ -203,7 +211,7 @@ void td_draw_triangle(uint8_t* buffer, intptr_t buf_width, intptr_t buf_height, 
     }
 }
 
-void td_blit_subimage(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+TD_EXPORT void td_blit_subimage(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
                       const uint8_t* src, intptr_t src_w, intptr_t src_h,
                       intptr_t dx, intptr_t dy,
                       intptr_t sx, intptr_t sy, intptr_t sw, intptr_t sh,
@@ -247,14 +255,14 @@ void td_blit_subimage(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
     }
 }
 
-void td_blit_sprite(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+TD_EXPORT void td_blit_sprite(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
                     const uint8_t* src, intptr_t src_w, intptr_t src_h,
                     intptr_t dx, intptr_t dy,
                     intptr_t key_r, intptr_t key_g, intptr_t key_b) {
     td_blit_subimage(dst, dst_w, dst_h, src, src_w, src_h, dx, dy, 0, 0, src_w, src_h, key_r, key_g, key_b);
 }
 
-void td_blit_subimage_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+TD_EXPORT void td_blit_subimage_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
                            const uint8_t* src, intptr_t src_w, intptr_t src_h,
                            intptr_t dx, intptr_t dy,
                            intptr_t sx, intptr_t sy, intptr_t sw, intptr_t sh) {
@@ -295,7 +303,7 @@ void td_blit_subimage_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
     }
 }
 
-void td_blit_sprite_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
+TD_EXPORT void td_blit_sprite_rgba(uint8_t* dst, intptr_t dst_w, intptr_t dst_h,
                          const uint8_t* src, intptr_t src_w, intptr_t src_h,
                          intptr_t dx, intptr_t dy) {
     td_blit_subimage_rgba(dst, dst_w, dst_h, src, src_w, src_h, dx, dy, 0, 0, src_w, src_h);

@@ -178,7 +178,15 @@ void set_pixel_font(unsigned char new_font[128][8]) {
  * @param size       The target size of the font (8 = 1x scale, 16 = 2x scale, etc.).
  * @param r, g, b    The color to draw the text in.
  */
-void draw_string_rgb(uint8_t* rgb_buffer, intptr_t buf_width, intptr_t buf_height,
+#ifndef TG_EXPORT
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+#define TG_EXPORT __declspec(dllexport)
+#else
+#define TG_EXPORT
+#endif
+#endif
+
+TG_EXPORT void draw_string_rgb(uint8_t* rgb_buffer, intptr_t buf_width, intptr_t buf_height,
                      const char* str, intptr_t x, intptr_t y, intptr_t size,
                      intptr_t r, intptr_t g, intptr_t b)
 {

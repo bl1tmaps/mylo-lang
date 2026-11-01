@@ -1957,60 +1957,85 @@ static void parse_import() {
 
         if (!MyloConfig.build_mode) {
             int added_natives = ffi_count - start_ffi_index;
-            char lib_name[MAX_STRING_LENGTH];
-
-            // Use the fully resolved path so the .so file is located properly!
-            get_lib_name(lib_name, resolved_path);
-
-            void *lib = load_library(lib_name);
-            if (!lib) {
-                // If no shared library is found, check if all added natives are cfn functions and already bound dynamically!
-                bool all_bound = (added_natives > 0);
-                for (int i = start_ffi_index; i < ffi_count; i++) {
-                    if (!ffi_blocks[i].is_bound) {
-                        all_bound = false;
-                        break;
-                    }
+            bool all_bound = (added_natives > 0);
+            for (int i = start_ffi_index; i < ffi_count; i++) {
+                if (!ffi_blocks[i].is_bound) {
+                    all_bound = false;
+                    break;
                 }
-                if (!all_bound) {
+            }
+
+            if (!all_bound) {
+                char lib_name[MAX_STRING_LENGTH];
+
+                // Use the fully resolved path so the .so file is located properly!
+                get_lib_name(lib_name, resolved_path);
+
+                void *lib = load_library(lib_name);
+                if (!lib) {
                     if (!MyloConfig.debug_mode) fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
                     error("Could not load native binary '%s'", lib_name);
-                }
-            } else {
-                if (!MyloConfig.debug_mode) fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
-                typedef void (*BindFunc)(VM *, int, MyloAPI *);
-                BindFunc binder = (BindFunc) get_symbol(lib, "mylo_bind_lib");
-                if (!binder) error("Native module '%s' invalid", lib_name);
+                } else {
+                    if (!MyloConfig.debug_mode) fprintf(stderr, "Mylo: Loading Native Module '%s'...\n", lib_name);
+                    typedef void (*BindFunc)(VM *, int, MyloAPI *);
+                    BindFunc binder = (BindFunc) get_symbol(lib, "mylo_bind_lib");
+                    if (!binder) {
+                        for (int i = start_ffi_index; i < ffi_count; i++) {
+                            if (ffi_blocks[i].is_cfn && !ffi_blocks[i].is_bound) {
+                                void *sym = get_symbol(lib, ffi_blocks[i].c_symbol_name);
+                                if (!sym && strcmp(ffi_blocks[i].func_name, ffi_blocks[i].c_symbol_name) != 0) {
+                                    sym = get_symbol(lib, ffi_blocks[i].func_name);
+                                }
+                                if (sym) {
+                                    ffi_blocks[i].native_symbol = sym;
+                                    ffi_blocks[i].is_bound = true;
+                                    bound_ffi_count++;
+                                    if (compiling_vm) {
+                                        compiling_vm->natives[std_count + i] = dynamic_cfn_invoker;
+                                    }
+                                }
+                            }
+                        }
+                        all_bound = (added_natives > 0);
+                        for (int i = start_ffi_index; i < ffi_count; i++) {
+                            if (!ffi_blocks[i].is_bound) {
+                                all_bound = false;
+                                break;
+                            }
+                        }
+                        if (!all_bound) error("Native module '%s' invalid", lib_name);
+                    } else {
+                        MyloAPI api;
+                        api.push = vm_push;
+                        api.pop = vm_pop;
+                        api.make_string = make_string;
+                        api.heap_alloc = heap_alloc;
+                        api.resolve_ptr = vm_resolve_ptr;
+                        api.store_copy = vm_store_copy;
+                        api.store_ptr = vm_store_ptr;
+                        api.get_ref = vm_get_ref;
+                        api.free_ref = vm_free_ref;
+                        api.natives_array = compiling_vm->natives;
+                        api.string_pool = compiling_vm->string_pool;
+                        api.find_function = vm_find_function;
+                        api.exec_vm_from = run_vm_from;
 
-                MyloAPI api;
-                api.push = vm_push;
-                api.pop = vm_pop;
-                api.make_string = make_string;
-                api.heap_alloc = heap_alloc;
-                api.resolve_ptr = vm_resolve_ptr;
-                api.store_copy = vm_store_copy;
-                api.store_ptr = vm_store_ptr;
-                api.get_ref = vm_get_ref;
-                api.free_ref = vm_free_ref;
-                api.natives_array = compiling_vm->natives;
-                api.string_pool = compiling_vm->string_pool;
-                api.find_function = vm_find_function;
-                api.exec_vm_from = run_vm_from;
+                        binder(compiling_vm, std_count + start_ffi_index, &api);
+                        bound_ffi_count += added_natives;
+                    }
 
-                binder(compiling_vm, std_count + start_ffi_index, &api);
-                bound_ffi_count += added_natives;
+                    if (compiling_vm && compiling_vm->dependency_count < MAX_DEPENDENCIES) {
+                        Dependency* dep = &compiling_vm->dependencies[compiling_vm->dependency_count++];
 
-                if (compiling_vm->dependency_count < MAX_DEPENDENCIES) {
-                    Dependency* dep = &compiling_vm->dependencies[compiling_vm->dependency_count++];
-
-                    // FIX: Strip directories so we only embed the base filename into the bundle
-                    char clean_lib_name[MAX_STRING_LENGTH];
-                    char* slash = strrchr(filename, '/');
-                    char* backslash = strrchr(filename, '\\');
-                    char* base_filename = (slash > backslash) ? slash + 1 : (backslash ? backslash + 1 : filename);
-                    get_lib_name(clean_lib_name, base_filename);
-                    strcpy(dep->name, clean_lib_name);
-                    dep->start_index = std_count + start_ffi_index;
+                        // FIX: Strip directories so we only embed the base filename into the bundle
+                        char clean_lib_name[MAX_STRING_LENGTH];
+                        char* slash = strrchr(filename, '/');
+                        char* backslash = strrchr(filename, '\\');
+                        char* base_filename = (slash > backslash) ? slash + 1 : (backslash ? backslash + 1 : filename);
+                        get_lib_name(clean_lib_name, base_filename);
+                        strcpy(dep->name, clean_lib_name);
+                        dep->start_index = std_count + start_ffi_index;
+                    }
                 }
             }
         }

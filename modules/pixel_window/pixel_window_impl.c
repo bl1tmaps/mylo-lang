@@ -10,37 +10,45 @@
 extern "C" {
 #endif
 
-float pw_get_mouse_x(PixelWindow* win) {
+#ifndef PW_EXPORT
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+#define PW_EXPORT __declspec(dllexport)
+#else
+#define PW_EXPORT
+#endif
+#endif
+
+PW_EXPORT float pw_get_mouse_x(PixelWindow* win) {
     if (!win) return 0.0f;
     const PwInputState* in = pw_get_input(win);
     return in ? in->mouse_x : 0.0f;
 }
 
-float pw_get_mouse_y(PixelWindow* win) {
+PW_EXPORT float pw_get_mouse_y(PixelWindow* win) {
     if (!win) return 0.0f;
     const PwInputState* in = pw_get_input(win);
     return in ? in->mouse_y : 0.0f;
 }
 
-bool pw_is_mouse_down(PixelWindow* win, int button) {
+PW_EXPORT bool pw_is_mouse_down(PixelWindow* win, int button) {
     if (!win || button < 0 || button >= 3) return false;
     const PwInputState* in = pw_get_input(win);
     return in ? in->mouse_down[button] : false;
 }
 
-bool pw_is_mouse_pressed(PixelWindow* win, int button) {
+PW_EXPORT bool pw_is_mouse_pressed(PixelWindow* win, int button) {
     if (!win || button < 0 || button >= 3) return false;
     const PwInputState* in = pw_get_input(win);
     return in ? in->mouse_pressed[button] : false;
 }
 
-bool pw_is_key_down(PixelWindow* win, int key) {
+PW_EXPORT bool pw_is_key_down(PixelWindow* win, int key) {
     if (!win || key < 0 || key >= 512) return false;
     const PwInputState* in = pw_get_input(win);
     return in ? in->keys_down[key] : false;
 }
 
-bool pw_is_key_pressed(PixelWindow* win, int key) {
+PW_EXPORT bool pw_is_key_pressed(PixelWindow* win, int key) {
     if (!win || key < 0 || key >= 512) return false;
     const PwInputState* in = pw_get_input(win);
     return in ? in->keys_pressed[key] : false;
@@ -55,7 +63,7 @@ static PixelWindow* pw_resolve_handle(int handle) {
     return (PixelWindow*)(intptr_t)handle;
 }
 
-int pw_create_window_id(int width, int height, const char* title, bool resizable) {
+PW_EXPORT int pw_create_window_id(int width, int height, const char* title, bool resizable) {
     PixelWindow* win = pw_create_window(width, height, title, resizable);
     if (!win) return 0;
     for (int i = 1; i < 64; i++) {
@@ -67,17 +75,17 @@ int pw_create_window_id(int width, int height, const char* title, bool resizable
     return 1;
 }
 
-bool pw_process_events_id(int handle) {
+PW_EXPORT bool pw_process_events_id(int handle) {
     PixelWindow* win = pw_resolve_handle(handle);
     return win ? pw_process_events(win) : false;
 }
 
-void pw_update_window_id(int handle, const uint8_t* rgb_buffer) {
+PW_EXPORT void pw_update_window_id(int handle, const uint8_t* rgb_buffer) {
     PixelWindow* win = pw_resolve_handle(handle);
     if (win) pw_update_window(win, rgb_buffer);
 }
 
-void pw_destroy_window_id(int handle) {
+PW_EXPORT void pw_destroy_window_id(int handle) {
     if (handle > 0 && handle < 64 && s_pw_window_table[handle]) {
         pw_destroy_window(s_pw_window_table[handle]);
         s_pw_window_table[handle] = NULL;
@@ -86,37 +94,37 @@ void pw_destroy_window_id(int handle) {
     if (handle) pw_destroy_window((PixelWindow*)(intptr_t)handle);
 }
 
-float pw_get_mouse_x_id(int handle) {
+PW_EXPORT float pw_get_mouse_x_id(int handle) {
     PixelWindow* win = pw_resolve_handle(handle);
     return pw_get_mouse_x(win);
 }
 
-float pw_get_mouse_y_id(int handle) {
+PW_EXPORT float pw_get_mouse_y_id(int handle) {
     PixelWindow* win = pw_resolve_handle(handle);
     return pw_get_mouse_y(win);
 }
 
-bool pw_is_mouse_down_id(int handle, int button) {
+PW_EXPORT bool pw_is_mouse_down_id(int handle, int button) {
     PixelWindow* win = pw_resolve_handle(handle);
     return pw_is_mouse_down(win, button);
 }
 
-bool pw_is_mouse_pressed_id(int handle, int button) {
+PW_EXPORT bool pw_is_mouse_pressed_id(int handle, int button) {
     PixelWindow* win = pw_resolve_handle(handle);
     return pw_is_mouse_pressed(win, button);
 }
 
-bool pw_is_key_down_id(int handle, int key) {
+PW_EXPORT bool pw_is_key_down_id(int handle, int key) {
     PixelWindow* win = pw_resolve_handle(handle);
     return pw_is_key_down(win, key);
 }
 
-bool pw_is_key_pressed_id(int handle, int key) {
+PW_EXPORT bool pw_is_key_pressed_id(int handle, int key) {
     PixelWindow* win = pw_resolve_handle(handle);
     return pw_is_key_pressed(win, key);
 }
 
-void pw_clear_buffer(uint8_t* buffer, intptr_t width, intptr_t height, intptr_t r, intptr_t g, intptr_t b) {
+PW_EXPORT void pw_clear_buffer(uint8_t* buffer, intptr_t width, intptr_t height, intptr_t r, intptr_t g, intptr_t b) {
     if (!buffer) return;
     int total = width * height;
     for (int i = 0; i < total; i++) {
@@ -130,7 +138,7 @@ void pw_clear_buffer(uint8_t* buffer, intptr_t width, intptr_t height, intptr_t 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-bool pw_load_image_info(const char* filename, int32_t* out_info) {
+PW_EXPORT bool pw_load_image_info(const char* filename, int32_t* out_info) {
     if (!filename || !out_info) return false;
     int w = 0, h = 0, channels = 0;
     if (stbi_info(filename, &w, &h, &channels)) {
@@ -142,7 +150,7 @@ bool pw_load_image_info(const char* filename, int32_t* out_info) {
     return false;
 }
 
-bool pw_load_image_pixels_rgba(const char* filename, uint8_t* out_buffer) {
+PW_EXPORT bool pw_load_image_pixels_rgba(const char* filename, uint8_t* out_buffer) {
     if (!filename || !out_buffer) return false;
     int w = 0, h = 0, channels = 0;
     stbi_uc* data = stbi_load(filename, &w, &h, &channels, 4);
@@ -152,7 +160,7 @@ bool pw_load_image_pixels_rgba(const char* filename, uint8_t* out_buffer) {
     return true;
 }
 
-bool pw_load_image_pixels_rgb(const char* filename, uint8_t* out_buffer) {
+PW_EXPORT bool pw_load_image_pixels_rgb(const char* filename, uint8_t* out_buffer) {
     if (!filename || !out_buffer) return false;
     int w = 0, h = 0, channels = 0;
     stbi_uc* data = stbi_load(filename, &w, &h, &channels, 3);

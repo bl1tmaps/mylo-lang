@@ -31,3 +31,19 @@ target_include_directories(pixel_window PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${
 if(EXTRA_LIBS)
     target_link_libraries(pixel_window PUBLIC ${EXTRA_LIBS})
 endif()
+
+# Also build as a standalone shared module (.dll on Windows, .so on Unix)
+add_library(pixel_window_shared SHARED ${PW_SRC})
+set_target_properties(pixel_window_shared PROPERTIES
+    OUTPUT_NAME "pixel_window"
+    PREFIX ""
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+if(NOT WIN32)
+    set_target_properties(pixel_window_shared PROPERTIES SUFFIX ".so")
+endif()
+target_include_directories(pixel_window_shared PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${MYLO_ROOT}/src")
+if(EXTRA_LIBS)
+    target_link_libraries(pixel_window_shared PUBLIC ${EXTRA_LIBS})
+endif()

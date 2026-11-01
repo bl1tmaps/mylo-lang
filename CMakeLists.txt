@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.16)
 project(mylo LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
@@ -41,6 +41,15 @@ ELSE()
 ENDIF()
 
 set_target_properties(mylo PROPERTIES ENABLE_EXPORTS ON)
+set_target_properties(tests PROPERTIES ENABLE_EXPORTS ON)
+if(WIN32)
+    set_target_properties(mylo PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    set_target_properties(tests PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+if(MINGW)
+    target_link_options(mylo PRIVATE "-Wl,--export-all-symbols")
+    target_link_options(tests PRIVATE "-Wl,--export-all-symbols")
+endif()
 
 option(MODULES "Build standalone Mylo modules" OFF)
 if(MODULES)
