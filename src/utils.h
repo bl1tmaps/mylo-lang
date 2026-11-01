@@ -4,6 +4,14 @@
 // This turns on Terminal Colours
 #define ENABLE_TERMINAL_COLOURS
 #include <stdio.h>
+
+#ifdef _WIN32
+#include <stdlib.h>
+#ifndef realpath
+#define realpath(N, R) _fullpath((R), (N), 2048)
+#endif
+#endif
+
 // Read file to char array
 char *read_file(const char *fn);
 
