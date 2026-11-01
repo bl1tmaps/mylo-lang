@@ -17,10 +17,18 @@ if(TARGET mylo)
     # Unified build: CMake knows exactly where the target is being built, 
     # regardless of whether it is in the root or a separate build/ folder.
     set(MYLO_EXE "$<TARGET_FILE:mylo>")
+    set(MYLO_TARGET mylo)
 else()
+    set(MYLO_TARGET "")
     # Standalone build: Look in the build folder first, then the root
     if(EXISTS "${MYLO_ROOT}/build/mylo")
         set(MYLO_EXE "${MYLO_ROOT}/build/mylo")
+    elseif(EXISTS "${MYLO_ROOT}/build/Debug/mylo.exe")
+        set(MYLO_EXE "${MYLO_ROOT}/build/Debug/mylo.exe")
+    elseif(EXISTS "${MYLO_ROOT}/build/Release/mylo.exe")
+        set(MYLO_EXE "${MYLO_ROOT}/build/Release/mylo.exe")
+    elseif(EXISTS "${MYLO_ROOT}/mylo.exe")
+        set(MYLO_EXE "${MYLO_ROOT}/mylo.exe")
     elseif(EXISTS "${MYLO_ROOT}/mylo")
         set(MYLO_EXE "${MYLO_ROOT}/mylo")
     else()
@@ -40,13 +48,16 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/gtk_state.h" "${CMAKE_CURRENT_BINARY
 add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/gtk_bridge.mylo_bind.c"
     COMMAND ${MYLO_EXE} --bind "gtk_bridge.mylo"
-    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/gtk_bridge.mylo" "${CMAKE_CURRENT_BINARY_DIR}/gtk_state.h"
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/gtk_bridge.mylo" "${CMAKE_CURRENT_BINARY_DIR}/gtk_state.h" ${MYLO_TARGET}
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     COMMENT "Generating Mylo C bindings for GTK..."
 )
 
 # 6. Build the Shared Library (Module/Plugin)
 add_library(gtk_bridge MODULE "${CMAKE_CURRENT_BINARY_DIR}/gtk_bridge.mylo_bind.c")
+if(TARGET mylo)
+    add_dependencies(gtk_bridge mylo)
+endif()
 
 # Remove the 'lib' prefix so it compiles as 'gtk_bridge.so'
 set_target_properties(gtk_bridge PROPERTIES PREFIX "")

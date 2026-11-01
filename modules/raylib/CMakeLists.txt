@@ -15,9 +15,17 @@ endif()
 # 2. Smartly locate the 'mylo' executable
 if(TARGET mylo)
     set(MYLO_EXE "$<TARGET_FILE:mylo>")
+    set(MYLO_TARGET mylo)
 else()
+    set(MYLO_TARGET "")
     if(EXISTS "${MYLO_ROOT}/build/mylo")
         set(MYLO_EXE "${MYLO_ROOT}/build/mylo")
+    elseif(EXISTS "${MYLO_ROOT}/build/Debug/mylo.exe")
+        set(MYLO_EXE "${MYLO_ROOT}/build/Debug/mylo.exe")
+    elseif(EXISTS "${MYLO_ROOT}/build/Release/mylo.exe")
+        set(MYLO_EXE "${MYLO_ROOT}/build/Release/mylo.exe")
+    elseif(EXISTS "${MYLO_ROOT}/mylo.exe")
+        set(MYLO_EXE "${MYLO_ROOT}/mylo.exe")
     elseif(EXISTS "${MYLO_ROOT}/mylo")
         set(MYLO_EXE "${MYLO_ROOT}/mylo")
     else()
@@ -55,7 +63,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/raylib_binding.mylo" "${CMAKE_CURREN
 add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/raylib_binding.mylo_bind.c"
     COMMAND ${MYLO_EXE} --bind "raylib_binding.mylo"
-    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/raylib_binding.mylo"
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/raylib_binding.mylo" ${MYLO_TARGET}
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     COMMENT "Generating Mylo C bindings for Raylib..."
 )
@@ -63,6 +71,9 @@ add_custom_command(
 # 5. Build the Shared Library (Module/Plugin)
 add_library(raylib_binding MODULE "${CMAKE_CURRENT_BINARY_DIR}/raylib_binding.mylo_bind.c")
 set_target_properties(raylib_binding PROPERTIES PREFIX "") # Compiles to 'raylib_binding.so'
+if(TARGET mylo)
+    add_dependencies(raylib_binding mylo)
+endif()
 
 target_include_directories(raylib_binding PRIVATE "${MYLO_ROOT}/src")
 target_link_libraries(raylib_binding PRIVATE raylib)
@@ -76,7 +87,7 @@ add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/example_out.c"
     COMMAND ${MYLO_EXE} --build "example.mylo"
     COMMAND ${CMAKE_COMMAND} -E rename "out.c" "example_out.c"
-    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/example.mylo"
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/example.mylo" ${MYLO_TARGET}
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     COMMENT "Compiling example.mylo into a standalone C executable..."
 )
@@ -88,10 +99,15 @@ add_executable(my_game
     "${MYLO_ROOT}/src/utils.c"
     "${MYLO_ROOT}/src/debug_adapter.c"
 )
+if(TARGET mylo)
+    add_dependencies(my_game mylo)
+endif()
 
 target_include_directories(my_game PRIVATE "${MYLO_ROOT}/src")
 target_link_libraries(my_game PRIVATE raylib)
 
-if(NOT WIN32)
+if(WIN32)
+    target_link_libraries(my_game PRIVATE ws2_32)
+else()
     target_link_libraries(my_game PRIVATE m)
 endif()

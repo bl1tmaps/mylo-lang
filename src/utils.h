@@ -1,6 +1,13 @@
 #ifndef MYLO_UTILS_H
 #define MYLO_UTILS_H
 
+#ifdef _WIN32
+#include <stdlib.h>
+#ifndef realpath
+#define realpath(N, R) _fullpath((R), (N), 2048)
+#endif
+#endif
+
 // This turns on Terminal Colours
 #define ENABLE_TERMINAL_COLOURS
 #include <stdio.h>

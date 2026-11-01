@@ -62,6 +62,7 @@ if(MODULES)
     message(STATUS "Configuring module: Raylib")
     add_subdirectory(modules/raylib)
     add_dependencies(raylib_binding mylo)
+    add_dependencies(my_game mylo)
   endif()
 
   # PIXEL_WINDOW Module
