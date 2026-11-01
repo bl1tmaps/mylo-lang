@@ -2345,7 +2345,11 @@ void get_lib_name(char* out, const char* base_name) {
 #ifdef _WIN32
     sprintf(out, "%s.dll", temp);
 #else
-    sprintf(out, "./%s.so", temp);
+    if (temp[0] == '/' || (temp[0] == '.' && temp[1] == '/')) {
+        sprintf(out, "%s.so", temp);
+    } else {
+        sprintf(out, "./%s.so", temp);
+    }
 #endif
 }
 
