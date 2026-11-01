@@ -1851,6 +1851,43 @@ inline TestOutput test_standalone_bundle_cfn() {
     return out;
 }
 
+inline TestOutput test_array_element_maths() {
+    std::string src = """"
+        "arr: i32[] = [0...10]\n"
+        "print(arr/2.)";
+    std::string expected = """"
+        "[0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5]\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_array_element_boolean() {
+    std::string src = """"
+        "arr: i32[] = [0...5]\n"
+        "print(arr > 2)";
+    std::string expected = """"
+        "[false, false, false, true, true, true]\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_array_element_branch() {
+    std::string src = """"
+        "arr: i32[] = [0...5]\n"
+        "if (arr) { print(arr[0]) }";
+    std::string expected = """"
+        "0\n";
+    return run_source_test(src, expected);
+}
+
+inline TestOutput test_array_element_branch_if_any_all() {
+    std::string src = """"
+        "arr: i32[] = [0, 0, 0, 0, 1]\n"
+        "if (any(arr)) { print(true) }\n"
+        "if (all(arr)) { print(true) }\n";
+    std::string expected = """"
+        "true\n";
+    return run_source_test(src, expected);
+}
+
 inline void test_generate_list() {
     ADD_TEST("Test Test", test_test);
     ADD_TEST("Test Print", test_hello_world);
@@ -1968,6 +2005,9 @@ inline void test_generate_list() {
     ADD_TEST("Test Filter f64", test_filter_f64);
     ADD_TEST("Test Param-Filter Both Orders", test_param_filter_both_orders);
     ADD_TEST("Test Standalone Bundle CFN", test_standalone_bundle_cfn);
+    ADD_TEST("Test Array Maths", test_array_element_maths);
+    ADD_TEST("Test Array Logical", test_array_element_boolean);
+    ADD_TEST("Test Array Branch", test_array_element_branch);
+    ADD_TEST("Test Array Any/All", test_array_element_branch_if_any_all);
 }
-
 #endif //MYLO_TEST_GENERATE_LIST_H
