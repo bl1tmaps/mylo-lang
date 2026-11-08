@@ -325,6 +325,13 @@ void emit(int op) {
 }
 
 // Compiles an imported file, recording its path so debuggers can tell its lines apart.
+// Replaces path with its absolute, canonical form when it can be resolved.
+// The buffer is PATH_MAX sized because glibc's fortified realpath() aborts on anything smaller.
+static void canonical_path(char* path, size_t size) {
+    char canon[4096];
+    if (realpath(path, canon)) snprintf(path, size, "%s", canon);
+}
+
 static void parse_imported_file(char* source, const char* path) {
     int saved_file = current_file_id;
     current_file_id = vm_add_source_file(compiling_vm, path);
@@ -1942,7 +1949,7 @@ static void parse_import() {
         if (!c) {
             for (int i = 0; i < search_path_count; i++) {
                 char tmp[MAX_STRING_LENGTH];
-                sprintf(tmp, "%s/%s", search_paths[i], filename);
+                snprintf(tmp, sizeof(tmp), "%s/%s", search_paths[i], filename);
                 c = read_file(tmp);
                 if (c) { strcpy(resolved_path, tmp); break; }
             }
@@ -1971,10 +1978,7 @@ static void parse_import() {
         }
 
         if (!c) error("Cannot find native import '%s'", filename);
-        char canon[2048];
-        if (realpath(resolved_path, canon)) {
-            strcpy(resolved_path, canon);
-        }
+        canonical_path(resolved_path, sizeof(resolved_path));
         for (int i = 0; i < imported_file_count; i++) {
             if (strcmp(imported_files[i], resolved_path) == 0 || strcmp(imported_files[i], filename) == 0) {
                 free(c);
@@ -1982,10 +1986,10 @@ static void parse_import() {
             }
         }
         if (imported_file_count < 1024) {
-            strcpy(imported_files[imported_file_count++], resolved_path);
+            snprintf(imported_files[imported_file_count++], MAX_STRING_LENGTH, "%s", resolved_path);
         }
-        char old_dir[1024];
-        strcpy(old_dir, current_file_dir);
+        char old_dir[sizeof(current_file_dir)];
+        memcpy(old_dir, current_file_dir, sizeof(old_dir));
         get_executable_dir(current_file_dir, sizeof(current_file_dir), resolved_path);
         parse_imported_file(c, resolved_path);
         strcpy(current_file_dir, old_dir);
@@ -2172,7 +2176,7 @@ static void parse_import() {
         if (!c) {
             for (int i = 0; i < search_path_count; i++) {
                 char tmp[MAX_STRING_LENGTH];
-                sprintf(tmp, "%s/%s", search_paths[i], f);
+                snprintf(tmp, sizeof(tmp), "%s/%s", search_paths[i], f);
                 c = read_file(tmp);
                 if (c) { strcpy(resolved_path, tmp); break; }
             }
@@ -2201,10 +2205,7 @@ static void parse_import() {
         }
 
         if (c) {
-            char canon[2048];
-            if (realpath(resolved_path, canon)) {
-                strcpy(resolved_path, canon);
-            }
+            canonical_path(resolved_path, sizeof(resolved_path));
             for (int i = 0; i < imported_file_count; i++) {
                 if (strcmp(imported_files[i], resolved_path) == 0 || strcmp(imported_files[i], f) == 0) {
                     free(c);
@@ -2212,10 +2213,10 @@ static void parse_import() {
                 }
             }
             if (imported_file_count < 1024) {
-                strcpy(imported_files[imported_file_count++], resolved_path);
+                snprintf(imported_files[imported_file_count++], MAX_STRING_LENGTH, "%s", resolved_path);
             }
-            char old_dir[1024];
-            strcpy(old_dir, current_file_dir);
+            char old_dir[sizeof(current_file_dir)];
+            memcpy(old_dir, current_file_dir, sizeof(old_dir));
             get_executable_dir(current_file_dir, sizeof(current_file_dir), resolved_path);
             parse_imported_file(c, resolved_path);
             strcpy(current_file_dir, old_dir);
@@ -2708,7 +2709,7 @@ static void parse_embed() {
     if (!f) {
         for (int i = 0; i < search_path_count; i++) {
             char tmp[MAX_STRING_LENGTH];
-            sprintf(tmp, "%s/%s", search_paths[i], filename);
+            snprintf(tmp, sizeof(tmp), "%s/%s", search_paths[i], filename);
             f = fopen(tmp, "rb");
             if (f) break;
         }

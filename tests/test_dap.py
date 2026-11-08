@@ -61,8 +61,18 @@ class Session:
         if arguments is not None:
             msg["arguments"] = arguments
         data = json.dumps(msg).encode()
-        self.proc.stdin.write(b"Content-Length: %d\r\n\r\n" % len(data) + data)
-        self.proc.stdin.flush()
+        try:
+            self.proc.stdin.write(b"Content-Length: %d\r\n\r\n" % len(data) + data)
+            self.proc.stdin.flush()
+        except OSError:
+            # The adapter has gone, most likely crashed: report why rather than the pipe error.
+            try:
+                code = self.proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                code = None
+            time.sleep(0.1)  # let the stderr reader catch up
+            raise AssertionError(f"the adapter exited (code {code}) before '{command}'. stderr:\n"
+                                 + "".join(self.stderr))
         return seq
 
     def _next(self, deadline):
