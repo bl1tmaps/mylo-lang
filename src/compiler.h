@@ -83,10 +83,17 @@ extern int local_count;
 
 // Compiler entry point
 void parse(VM* vm, char *source);
+// Names the main script, so debuggers and errors can refer to it. Call before parse().
+void compiler_set_main_file(VM* vm, const char* path);
+// The file being compiled, so a compile error can say where it is. "" if unknown.
+const char* compiler_current_file(void);
 void compile_to_c_source(VM* vm, const char *output_filename);
 void generate_binding_c_source(VM* vm, const char *output_filename);
 void compile_repl(VM* vm, char* source, int* out_start_ip);
 void compiler_reset();
+// Struct names and field names from the last compile, for debuggers. NULL if out of range.
+const char* compiler_struct_name(int id);
+const char* compiler_struct_field(int id, int field);
 void create_standalone_executable(VM* vm, const char* output_filename, const char* host_exe_path);
 bool load_self_contained(VM* vm, const char* exe_path);
 #endif

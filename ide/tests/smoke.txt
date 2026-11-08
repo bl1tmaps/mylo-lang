@@ -1,0 +1,18 @@
+# Mylo IDE smoke test: mylo-ide --automate ide/tests/smoke.txt ide/tests/smoke.mylo
+# It exits with code 2 if a step times out. Screenshots land in the working directory.
+frames 10
+breakpoint 3
+debug
+waitpaused
+focus Variables
+memtab Overview
+frames 10
+shot ide-smoke-paused.png
+stepover
+waitpaused
+continue
+waitexit
+focus Console
+frames 5
+shot ide-smoke-finished.png
+quit

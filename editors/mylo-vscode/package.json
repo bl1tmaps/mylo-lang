@@ -47,6 +47,11 @@
                 "description": "Program working directory",
                 "default": "${workspaceFolder}"
               },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Stop on the program's first line. Set false to run to the first breakpoint.",
+                "default": true
+              },
               "env": {
                 "type": "object",
                 "description": "Environment variables to pass to the program",

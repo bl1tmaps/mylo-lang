@@ -4,6 +4,12 @@ project(mylo LANGUAGES C CXX)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 
+# Release builds pass e.g. -DMYLO_VERSION_SUFFIX=-abc1234, shown after the version number.
+set(MYLO_VERSION_SUFFIX "" CACHE STRING "Text added to the version, such as a commit hash")
+if(MYLO_VERSION_SUFFIX)
+    add_compile_definitions(MYLO_VERSION_SUFFIX="${MYLO_VERSION_SUFFIX}")
+endif()
+
 add_executable(mylo src/main.c src/compiler.c src/vm.h src/vm.c
         src/utils.h
         src/utils.c
@@ -11,12 +17,14 @@ add_executable(mylo src/main.c src/compiler.c src/vm.h src/vm.c
         src/mylolib.h
         src/mylolib.c
         src/debug_adapter.c
+        src/vm_options.c
 )
 add_executable(tests tests/tests.cpp src/compiler.c src/vm.h src/vm.c
         src/utils.c
         src/mylolib.h
         src/mylolib.c
         src/debug_adapter.c
+        src/vm_options.c
 )
 add_executable(mylo-vsproject tools/mylo-vsproject.cpp)
 add_executable(mylo-lsp lsp/mylo_lsp.c
@@ -25,6 +33,7 @@ add_executable(mylo-lsp lsp/mylo_lsp.c
         src/defines.h
         src/mylolib.h src/mylolib.c
         src/debug_adapter.c
+        src/vm_options.c
 )
 target_include_directories(mylo-lsp PRIVATE src)
 IF (WIN32)
@@ -39,6 +48,24 @@ ELSE()
     target_link_libraries(tests m)
     target_link_libraries(mylo-lsp m)
 ENDIF()
+
+# The tests throw C++ exceptions out of error callbacks, through the C compiler code.
+# MSVC's default /EHsc assumes C functions never throw and drops the tests' try blocks.
+if(MSVC)
+    target_compile_options(tests PRIVATE /EHs /EHc-)
+endif()
+
+# Some tests write files, so they run in the build folder; this tells them where tests/ is.
+target_compile_definitions(tests PRIVATE MYLO_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/")
+
+enable_testing()
+add_test(NAME mylo_tests COMMAND tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+# Drives `mylo --dap` through real debugging sessions.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME dap_tests COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dap.py $<TARGET_FILE:mylo>)
+endif()
 
 set_target_properties(mylo PROPERTIES ENABLE_EXPORTS ON)
 set_target_properties(tests PROPERTIES ENABLE_EXPORTS ON)
@@ -81,4 +108,12 @@ if(MODULES)
   endif()
 else()
   message(STATUS "Skipping modules. Pass -DMODULES=ON to build them.")
+endif()
+
+# -----------------------------------------------------------------------------
+# Mylo IDE (fetches raylib). Turn off with -DMYLO_BUILD_IDE=OFF for a core-only build.
+# -----------------------------------------------------------------------------
+option(MYLO_BUILD_IDE "Build Mylo IDE" ON)
+if(MYLO_BUILD_IDE)
+    add_subdirectory(ide)
 endif()

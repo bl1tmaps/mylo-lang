@@ -63,5 +63,5 @@ int main()
 
     std::cout << "Tests Passed : " << passed << " out of " << total << std::endl;
 
-    return 0;
+    return passed == total ? 0 : 1;
 }

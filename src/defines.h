@@ -2,12 +2,17 @@
 #define MYLO_DEFINES_H
 
 // VM Memory Limits
+// These are the defaults. Each can be changed at runtime with a mylovm.conf file or
+// -X key=value (see vm_options.h); VMs read the limits from their own fields, not these.
 #define STACK_SIZE 2048
 #define MAX_CODE 5368709
 #define MAX_HEAP 100000000
 #define MAX_GLOBALS 2048
 #define MAX_CONSTANTS 1024
 #define MAX_ARENAS 64         // 6 bits
+#define DEFAULT_ARENA_SLOTS 1048576
+#define MAX_ARENA_SLOTS (1 << 28) // PTR_OFFSET_BITS
+#define MAX_SOURCE_FILES 256
 
 // String Limits
 #define MAX_STRINGS 10000

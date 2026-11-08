@@ -1,0 +1,171 @@
+# Builds Mylo (mylo, mylo-lsp, mylo-vsproject and Mylo IDE) for Windows, macOS and Linux,
+# runs the tests, and zips each build.
+#
+#   Pull request    -> build and test on every platform.
+#   Merge to main   -> the same, and the zips are kept as artifacts on the workflow run.
+#   Release created -> the same, and the zips are attached to that release.
+#   Run workflow    -> manual run from the Actions tab, for any branch.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  # A newer push replaces a running build, but a release build always finishes.
+  cancel-in-progress: ${{ github.event_name != 'release' }}
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows-x64
+          # Apple Silicon.
+          - os: macos-15
+            platform: macos-arm64
+          # The oldest supported Ubuntu, so the binaries run on older glibc versions.
+          - os: ubuntu-22.04
+            platform: linux-x64
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev \
+            libxi-dev libxinerama-dev libxrandr-dev xvfb mesa-utils
+
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "suffix=" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            echo "suffix=-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure
+        shell: bash
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          -DMYLO_VERSION_SUFFIX=${{ steps.version.outputs.suffix }}
+
+      - name: Compile
+        # An unlimited job count can exhaust the runner's memory on Linux.
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Test
+        # Unit tests, debugger sessions over DAP, and the editor fuzz test.
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: IDE smoke test
+        # Starts Mylo IDE in a virtual display and debugs a script through its UI.
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          MYLO_IDE_CONFIG: ${{ runner.temp }}/mylo-ide-config
+        run: |
+          timeout 120 xvfb-run -a -s "-screen 0 1600x1000x24" \
+            ./build/ide/mylo-ide --automate ide/tests/smoke.txt ide/tests/smoke.mylo
+          test -s ide-smoke-paused.png
+          test -s ide-smoke-finished.png
+
+      - name: Upload IDE screenshots
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ide-smoke-screenshots
+          path: ide-smoke-*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Package
+        id: package
+        shell: bash
+        run: bash .github/scripts/package.sh "${{ steps.version.outputs.name }}" "${{ matrix.platform }}"
+
+      - name: Upload zip
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.package.outputs.zip }}
+          archive: false # It's already a zip, so don't wrap it in a second one.
+          retention-days: 30
+          if-no-files-found: error
+
+  # The core and the editor under AddressSanitizer, which catches memory errors the tests miss.
+  sanitizers:
+    name: Sanitizers (linux-x64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev \
+            libxi-dev libxinerama-dev libxrandr-dev
+
+      - name: Configure
+        run: >
+          cmake -B build-asan
+          -DCMAKE_BUILD_TYPE=Debug
+          -DMYLO_FUZZ_SANITIZE=ON
+          -DMYLO_FUZZ_SEEDS=2000
+          "-DCMAKE_C_FLAGS=-fsanitize=address -fno-omit-frame-pointer"
+          "-DCMAKE_CXX_FLAGS=-fsanitize=address -fno-omit-frame-pointer"
+          "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address"
+
+      - name: Compile
+        run: cmake --build build-asan --target mylo tests text_editor_fuzz --parallel 4
+
+      - name: Test
+        env:
+          # The VM keeps some memory until exit on purpose; leaks aren't what this job looks for.
+          ASAN_OPTIONS: detect_leaks=0
+        run: ctest --test-dir build-asan --output-on-failure
+
+  # Runs after every build passes, so a release gets every zip or none.
+  publish:
+    name: Attach zips to release
+    if: github.event_name == 'release'
+    needs: [build, sanitizers]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Mylo-*
+          path: dist
+          merge-multiple: true
+          skip-decompress: true # Keep the zips as zips.
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/*.zip --clobber

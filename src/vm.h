@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include "defines.h"
+#include "vm_options.h"
 #include "stddef.h"
 
 // --- Types ---
@@ -134,7 +135,8 @@ typedef struct VM {
     int* lines;
     int* stack_types;
     int* global_types;
-    char (*string_pool)[MAX_STRING_LENGTH];
+    // One allocation per string, sized to fit. Indexing works as before: vm->string_pool[id].
+    char** string_pool;
     int code_size;
     int sp;
     int fp;
@@ -159,6 +161,21 @@ typedef struct VM {
     NativeFunc natives[MAX_NATIVES];
     Dependency dependencies[MAX_DEPENDENCIES];
     int dependency_count;
+
+    // --- Limits, copied from MyloVMOpts when the VM is created ---
+    int stack_capacity;
+    int max_strings;
+    int max_string_length;
+    int max_code;
+    int max_constants;
+    int heap_initial;
+    int heap_max;
+    char* scratch;          // Holds a joined string before it's interned: 2 * max_string_length + 64 bytes.
+
+    // --- Source files, for debuggers and error messages ---
+    int* file_ids;          // The source file of each bytecode word, parallel to lines.
+    char (*source_files)[MYLO_VM_PATH_LENGTH];
+    int source_file_count;
 } VM;
 
 typedef struct {
@@ -172,7 +189,7 @@ typedef struct {
     void* (*get_ref)(VM*, int, const char*);
     void (*free_ref)(VM*, int);
     NativeFunc* natives_array;
-    char (*string_pool)[MAX_STRING_LENGTH];
+    char** string_pool;
 
     // For plugins
     int (*find_function)(VM*, const char*);
@@ -188,6 +205,12 @@ int make_const(VM* vm, double val);
 double heap_alloc(VM* vm, int size);
 void run_vm_from(VM* vm, int start_ip, bool debug_trace);
 void run_vm(VM* vm, bool debug_trace);
+// Registers a source file and returns its id, or the existing id for a path seen before.
+int vm_add_source_file(VM* vm, const char* path);
+// The source file of a bytecode address, or "" if unknown.
+const char* vm_source_file_at(VM* vm, int ip);
+// The interned string with this id, or "" for an id outside the pool.
+const char* vm_string(VM* vm, int id);
 int vm_step(VM* vm, bool debug_trace);
 double* vm_resolve_ptr(VM* vm, double ptr_val);
 double* vm_resolve_ptr_safe(VM* vm, double ptr_val);
@@ -231,4 +254,6 @@ void get_lib_name(char* out, const char* base_name);
 
 // errors
 void mylo_runtime_error(VM* vm, const char* fmt, ...);
+// Reports that a configurable limit was reached, naming the mylovm.conf setting to raise.
+void mylo_limit_error(VM* vm, const char* what, const char* key, long long limit);
 #endif
