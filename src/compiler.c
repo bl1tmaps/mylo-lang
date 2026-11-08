@@ -195,6 +195,15 @@ struct StructDef {
 
 int struct_count = 0;
 
+const char* compiler_struct_name(int id) {
+    return (id >= 0 && id < struct_count) ? struct_defs[id].name : NULL;
+}
+
+const char* compiler_struct_field(int id, int field) {
+    if (id < 0 || id >= struct_count || field < 0 || field >= struct_defs[id].field_count) return NULL;
+    return struct_defs[id].fields[field];
+}
+
 EnumEntry enum_entries[MAX_ENUM_MEMBERS];
 int enum_entry_count = 0;
 
@@ -302,14 +311,43 @@ void error(const char *fmt, ...) {
     mylo_exit(1);
 }
 
+// The source file being compiled, as an index into compiling_vm->source_files.
+static int current_file_id = 0;
+
 void emit(int op) {
-    if (compiling_vm->code_size >= MAX_CODE) {
-        fprintf(stderr, "Error: Code overflow\n");
-        mylo_exit(1);
+    if (compiling_vm->code_size >= compiling_vm->max_code) {
+        mylo_limit_error(compiling_vm, "Code overflow: the program is too large", "max_code", compiling_vm->max_code);
     }
     compiling_vm->bytecode[compiling_vm->code_size] = op;
     compiling_vm->lines[compiling_vm->code_size] = prev_token.line > 0 ? prev_token.line : line;
+    if (compiling_vm->file_ids) compiling_vm->file_ids[compiling_vm->code_size] = current_file_id;
     compiling_vm->code_size++;
+}
+
+// Compiles an imported file, recording its path so debuggers can tell its lines apart.
+// Replaces path with its absolute, canonical form when it can be resolved.
+// The buffer is PATH_MAX sized because glibc's fortified realpath() aborts on anything smaller.
+static void canonical_path(char* path, size_t size) {
+    char canon[4096];
+    if (realpath(path, canon)) snprintf(path, size, "%s", canon);
+}
+
+static void parse_imported_file(char* source, const char* path) {
+    int saved_file = current_file_id;
+    current_file_id = vm_add_source_file(compiling_vm, path);
+    parse_internal(source, true);
+    current_file_id = saved_file;
+}
+
+const char* compiler_current_file(void) {
+    if (!compiling_vm) return "";
+    if (current_file_id < 0 || current_file_id >= compiling_vm->source_file_count) return "";
+    return compiling_vm->source_files[current_file_id];
+}
+
+void compiler_set_main_file(VM* vm, const char* path) {
+    vm->source_file_count = 0;
+    current_file_id = vm_add_source_file(vm, path ? path : "main.mylo");
 }
 
 int find_local(char *name) {
@@ -1008,6 +1046,10 @@ void compiler_reset() {
     current_scope_depth = 0;
     current_namespace[0] = '\0';
     search_path_count = 0;
+    // Folders from mylovm.conf are searched like module_path() calls in the script.
+    for (int i = 0; i < MyloVMOpts.module_path_count && search_path_count < MAX_SEARCH_PATHS; i++) {
+        snprintf(search_paths[search_path_count++], MAX_STRING_LENGTH, "%s", MyloVMOpts.module_paths[i]);
+    }
     c_header_count = 0;
     line = 1;
     inside_function = false;
@@ -1907,7 +1949,7 @@ static void parse_import() {
         if (!c) {
             for (int i = 0; i < search_path_count; i++) {
                 char tmp[MAX_STRING_LENGTH];
-                sprintf(tmp, "%s/%s", search_paths[i], filename);
+                snprintf(tmp, sizeof(tmp), "%s/%s", search_paths[i], filename);
                 c = read_file(tmp);
                 if (c) { strcpy(resolved_path, tmp); break; }
             }
@@ -1936,10 +1978,7 @@ static void parse_import() {
         }
 
         if (!c) error("Cannot find native import '%s'", filename);
-        char canon[2048];
-        if (realpath(resolved_path, canon)) {
-            strcpy(resolved_path, canon);
-        }
+        canonical_path(resolved_path, sizeof(resolved_path));
         for (int i = 0; i < imported_file_count; i++) {
             if (strcmp(imported_files[i], resolved_path) == 0 || strcmp(imported_files[i], filename) == 0) {
                 free(c);
@@ -1947,12 +1986,12 @@ static void parse_import() {
             }
         }
         if (imported_file_count < 1024) {
-            strcpy(imported_files[imported_file_count++], resolved_path);
+            snprintf(imported_files[imported_file_count++], MAX_STRING_LENGTH, "%s", resolved_path);
         }
-        char old_dir[1024];
-        strcpy(old_dir, current_file_dir);
+        char old_dir[sizeof(current_file_dir)];
+        memcpy(old_dir, current_file_dir, sizeof(old_dir));
         get_executable_dir(current_file_dir, sizeof(current_file_dir), resolved_path);
-        parse_internal(c, true);
+        parse_imported_file(c, resolved_path);
         strcpy(current_file_dir, old_dir);
 
         if (!MyloConfig.build_mode) {
@@ -2137,7 +2176,7 @@ static void parse_import() {
         if (!c) {
             for (int i = 0; i < search_path_count; i++) {
                 char tmp[MAX_STRING_LENGTH];
-                sprintf(tmp, "%s/%s", search_paths[i], f);
+                snprintf(tmp, sizeof(tmp), "%s/%s", search_paths[i], f);
                 c = read_file(tmp);
                 if (c) { strcpy(resolved_path, tmp); break; }
             }
@@ -2166,10 +2205,7 @@ static void parse_import() {
         }
 
         if (c) {
-            char canon[2048];
-            if (realpath(resolved_path, canon)) {
-                strcpy(resolved_path, canon);
-            }
+            canonical_path(resolved_path, sizeof(resolved_path));
             for (int i = 0; i < imported_file_count; i++) {
                 if (strcmp(imported_files[i], resolved_path) == 0 || strcmp(imported_files[i], f) == 0) {
                     free(c);
@@ -2177,12 +2213,12 @@ static void parse_import() {
                 }
             }
             if (imported_file_count < 1024) {
-                strcpy(imported_files[imported_file_count++], resolved_path);
+                snprintf(imported_files[imported_file_count++], MAX_STRING_LENGTH, "%s", resolved_path);
             }
-            char old_dir[1024];
-            strcpy(old_dir, current_file_dir);
+            char old_dir[sizeof(current_file_dir)];
+            memcpy(old_dir, current_file_dir, sizeof(old_dir));
             get_executable_dir(current_file_dir, sizeof(current_file_dir), resolved_path);
-            parse_internal(c, true);
+            parse_imported_file(c, resolved_path);
             strcpy(current_file_dir, old_dir);
         }
         else error("Cannot find import '%s'", f);
@@ -2673,7 +2709,7 @@ static void parse_embed() {
     if (!f) {
         for (int i = 0; i < search_path_count; i++) {
             char tmp[MAX_STRING_LENGTH];
-            sprintf(tmp, "%s/%s", search_paths[i], filename);
+            snprintf(tmp, sizeof(tmp), "%s/%s", search_paths[i], filename);
             f = fopen(tmp, "rb");
             if (f) break;
         }
@@ -3258,6 +3294,10 @@ void parse_function_body(char* registered_name, char* mangled_name, int implicit
     emit(OP_JMP);
     int p = compiling_vm->code_size;
     emit(0);
+    // The jump over the body isn't a statement, so give it no line. Otherwise a debugger
+    // would stop on every function header as the program starts.
+    compiling_vm->lines[p - 1] = 0;
+    compiling_vm->lines[p] = 0;
     strcpy(funcs[func_count].name, mangled_name);
     funcs[func_count++].addr = compiling_vm->code_size;
     vm_register_function(compiling_vm, registered_name, compiling_vm->code_size);
@@ -3401,6 +3441,9 @@ void parse_internal(char *source, bool is_import) {
 
 void parse(VM* vm, char *source) {
     compiling_vm = vm;
+    // Code from the main script is file 0, unless the caller already named it.
+    if (vm->source_file_count == 0) vm_add_source_file(vm, "main.mylo");
+    current_file_id = 0;
     parse_internal(source, false);
 }
 
@@ -3536,23 +3579,22 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     }
     fprintf(fp, "};\n\n");
 
-    int pool_count = vm->str_count > 0 ? vm->str_count : 1;
-    fprintf(fp, "char string_pool[%d][%d] = {\n", pool_count, MAX_STRING_LENGTH);
+    fprintf(fp, "const char* string_pool[] = {\n");
     for (int i = 0; i < vm->str_count; i++) {
         fprintf(fp, "  \"");
-        for (int j = 0; j < MAX_STRING_LENGTH; j++) {
-            char c = vm->string_pool[i][j];
-            if (c == '\0') break;
+        for (const char* p = vm->string_pool[i]; *p; p++) {
+            char c = *p;
             if (c == '"') fprintf(fp, "\\\"");
             else if (c == '\\') fprintf(fp, "\\\\");
             else if (c == '\n') fprintf(fp, "\\n");
             else if (c == '\r') fprintf(fp, "\\r");
+            else if (c == '?') fprintf(fp, "\\?");   // avoids trigraphs
             else if (c >= 32 && c <= 126) fprintf(fp, "%c", c);
-            else fprintf(fp, "\\x%02x", (unsigned char) c);
+            else fprintf(fp, "\\%03o", (unsigned char) c);   // octal can't swallow the next character
         }
         fprintf(fp, "\",\n");
     }
-    fprintf(fp, "};\n\n");
+    fprintf(fp, "  0\n};\n\n");
 
     int sym_count = vm->global_symbol_count > 0 ? vm->global_symbol_count : 1;
     fprintf(fp, "VMSymbol global_symbols[%d] = {\n", sym_count);
@@ -3595,8 +3637,8 @@ void compile_to_c_source(VM* vm, const char *output_filename) {
     fprintf(fp, "    vm.const_count = %d;\n", vm->const_count);
     fprintf(fp, "    memcpy(vm.constants, constants, sizeof(constants));\n\n");
 
-    fprintf(fp, "    vm.str_count = %d;\n", vm->str_count);
-    fprintf(fp, "    memcpy(vm.string_pool, string_pool, sizeof(string_pool));\n\n");
+    fprintf(fp, "    // Strings are unique, so interning them in order keeps their ids.\n");
+    fprintf(fp, "    for (int i = 0; i < %d; i++) make_string(&vm, string_pool[i]);\n\n", vm->str_count);
     fprintf(fp, "    vm.global_symbol_count = %d;\n", vm->global_symbol_count);
     fprintf(fp, "    vm.global_symbols = malloc(sizeof(VMSymbol) * %d);\n", sym_count);
     fprintf(fp, "    memcpy(vm.global_symbols, global_symbols, sizeof(VMSymbol) * vm.global_symbol_count);\n\n");
@@ -3737,9 +3779,13 @@ void create_standalone_executable(VM* vm, const char* output_filename, const cha
     // 3. Append Constants
     fwrite(vm->constants, sizeof(double), vm->const_count, out);
 
-    // 4. Append String Pool
-    // We flatten the 2D array for simple writing
-    fwrite(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, out);
+    // 4. Append String Pool, each string followed by its terminating zero.
+    long string_bytes = 0;
+    for (int i = 0; i < vm->str_count; i++) {
+        size_t len = strlen(vm->string_pool[i]) + 1;
+        fwrite(vm->string_pool[i], 1, len, out);
+        string_bytes += (long)len;
+    }
 
     fwrite(vm->dependencies, sizeof(Dependency), vm->dependency_count, out);
     fwrite(vm->global_symbols, sizeof(VMSymbol), vm->global_symbol_count, out);
@@ -3751,7 +3797,7 @@ void create_standalone_executable(VM* vm, const char* output_filename, const cha
     strcpy(footer.magic, MYLO_MAGIC);
     footer.bytecode_size = vm->code_size * sizeof(int);
     footer.const_size = vm->const_count * sizeof(double);
-    footer.string_size = vm->str_count * MAX_STRING_LENGTH;
+    footer.string_size = string_bytes;
     footer.symbol_size = vm->global_symbol_count * sizeof(VMSymbol);
     footer.function_size = vm->function_count * sizeof(VMFunction);
     footer.ffi_size = ffi_count * sizeof(FFIBlock);
@@ -3788,15 +3834,28 @@ bool load_self_contained(VM* vm, const char* exe_path) {
 
     // 1. Read Bytecode
     vm->code_size = footer.bytecode_size / sizeof(int);
+    if (vm->code_size > vm->max_code) mylo_limit_error(vm, "This program is too large", "max_code", vm->max_code);
     fread(vm->bytecode, sizeof(int), vm->code_size, f);
 
     // 2. Read Constants
     vm->const_count = footer.const_size / sizeof(double);
+    if (vm->const_count > vm->max_constants) mylo_limit_error(vm, "Too many constants", "max_constants", vm->max_constants);
     fread(vm->constants, sizeof(double), vm->const_count, f);
 
-    // 3. Read Strings
-    vm->str_count = footer.string_size / MAX_STRING_LENGTH;
-    fread(vm->string_pool, MAX_STRING_LENGTH, vm->str_count, f);
+    // 3. Read Strings, which are stored one after another, each ending in a zero byte.
+    if (footer.string_size > 0) {
+        char* strings = malloc(footer.string_size + 1);
+        if (!strings) { fclose(f); return false; }
+        fread(strings, 1, footer.string_size, f);
+        strings[footer.string_size] = '\0';
+        vm->str_count = 0;
+        for (long pos = 0; pos < footer.string_size; ) {
+            // Interning in order keeps each string's id, since the pool was unique.
+            make_string(vm, strings + pos);
+            pos += (long)strlen(strings + pos) + 1;
+        }
+        free(strings);
+    }
 
     // 4. Read Dependencies (Store in temporary memory so we can read symbols next)
     int dep_count = footer.dependency_size / sizeof(Dependency);

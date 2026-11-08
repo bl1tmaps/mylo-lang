@@ -204,10 +204,8 @@ void std_create_worker(VM *vm) {
   child->const_count = vm->const_count;
   memcpy(child->constants, vm->constants, vm->const_count * sizeof(double));
 
-  // Copy Strings
-  child->str_count = vm->str_count;
-  memcpy(child->string_pool, vm->string_pool,
-         vm->str_count * MAX_STRING_LENGTH);
+  // Copy Strings. Interning them in order keeps their ids, since the pool is unique.
+  for (int i = 0; i < vm->str_count; i++) make_string(child, vm->string_pool[i]);
 
   // Copy Function Table
   child->function_count = vm->function_count;
@@ -2238,6 +2236,29 @@ void std_web_triangle(VM *vm) {
 }
 #define RUNTIME_ERROR(fmt, ...) mylo_runtime_error(vm, fmt, ##__VA_ARGS__)
 
+// input(prompt): prints the prompt, then reads one line from stdin without its line ending.
+// Returns "" at the end of input.
+void std_input(VM *vm) {
+  double prompt = vm_pop(vm);
+  int prompt_type = vm->stack_types[vm->sp + 1];
+  if (prompt_type == T_STR) {
+    print_raw(vm, vm_string(vm, (int)prompt));
+    fflush(stdout);
+  }
+  char *line = (char *)malloc((size_t)vm->max_string_length + 2);
+  if (!line) { vm_push(vm, (double)make_string(vm, ""), T_STR); return; }
+  size_t len = 0;
+  int ch;
+  while ((ch = fgetc(stdin)) != EOF && ch != '\n') {
+    if (len < (size_t)vm->max_string_length) line[len++] = (char)ch;
+  }
+  if (len > 0 && line[len - 1] == '\r') len--;
+  line[len] = '\0';
+  int id = make_string(vm, line);
+  free(line);
+  vm_push(vm, (double)id, T_STR);
+}
+
 void std_function_exists(VM *vm) {
   double name_val = vm_pop(vm);
   int name_type = vm->stack_types[vm->sp + 1];
@@ -3013,4 +3034,6 @@ const StdLibDef std_library[] = {
     {"file_write_row", std_file_write_row, "void", 3, {"num", "arr", "num"}},
     {"file_flush", std_file_flush, "void", 1, {"num"}},
     {"file_close", std_file_close, "void", 1, {"num"}},
+    // New functions go at the end, so the ids of those above don't change.
+    {"input", std_input, "str", 1, {"str"}},
     {NULL, NULL, NULL, 0, {NULL}}};

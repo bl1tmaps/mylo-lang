@@ -8,7 +8,7 @@
 #ifdef _WIN32
 #include <stdlib.h>
 #ifndef realpath
-#define realpath(N, R) _fullpath((R), (N), 2048)
+#define realpath(N, R) _fullpath((R), (N), 4096)
 #endif
 #endif
 

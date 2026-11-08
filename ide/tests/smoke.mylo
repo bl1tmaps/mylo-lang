@@ -1,0 +1,9 @@
+// Used by ide/tests/smoke.txt: the IDE debugs this, stops on line 3 and steps.
+fn add(a: i32, b: i32) -> i32 {
+    total: i32 = a + b
+    ret total
+}
+
+nums: i32[] = [1, 2, 3]
+result: i32 = add(nums[0], nums[2])
+print(f"result {result}")

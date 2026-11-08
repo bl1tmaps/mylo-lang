@@ -73,9 +73,12 @@ void mylo_runtime_error(VM* vm, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
 
-    printf("[Line %d] Runtime Error: ", vm->lines[vm->ip - 1]);
+    int line = (vm->lines && vm->ip > 0) ? vm->lines[vm->ip - 1] : 0;
     vsnprintf(buffer, 1024, fmt, args);
-    printf("%s\n", buffer); // Print to console
+    // A debugger reports the error itself, through the error callback.
+    if (!(MyloConfig.debug_mode && MyloConfig.error_callback)) {
+        printf("[Line %d] Runtime Error: %s\n", line, buffer);
+    }
 
     va_end(args);
     if (MyloConfig.debug_mode && MyloConfig.error_callback) {
@@ -93,6 +96,18 @@ void mylo_runtime_error(VM* vm, const char* fmt, ...) {
     }
 }
 
+
+void mylo_limit_error(VM* vm, const char* what, const char* key, long long limit) {
+    char message[512];
+    snprintf(message, sizeof(message),
+             "%s (%s = %lld). Raise it in mylovm.conf or with -X %s=<value>.", what, key, limit, key);
+    // Before the program starts there's no line to report, so this is a plain fatal error.
+    if (vm && vm->ip > 0) mylo_runtime_error(vm, "%s", message);
+    fprintf(stderr, "Error: %s\n", message);
+    if (MyloConfig.error_callback) MyloConfig.error_callback(message);
+    if (MyloConfig.repl_jmp_buf) longjmp(*(jmp_buf*)MyloConfig.repl_jmp_buf, 1);
+    exit(1);
+}
 
 #define RUNTIME_ERROR(fmt, ...) mylo_runtime_error(vm, fmt, ##__VA_ARGS__)
 #define CHECK_STACK(count) if (vm->sp < (count) - 1) RUNTIME_ERROR("Stack Underflow")
@@ -191,7 +206,9 @@ void init_arena(VM* vm, int id) {
     if (vm->arenas[id].generation == 0) vm->arenas[id].generation = 1;
 
     if (vm->arenas[id].memory == NULL) {
-        vm->arenas[id].capacity = 1048576; // 1M elements initial
+        int initial = vm->heap_initial > 0 ? vm->heap_initial : DEFAULT_ARENA_SLOTS;
+        if (vm->heap_max > 0 && initial > vm->heap_max) initial = vm->heap_max;
+        vm->arenas[id].capacity = initial;
         vm->arenas[id].memory = (double*)calloc(vm->arenas[id].capacity, sizeof(double));
         vm->arenas[id].types = (int*)calloc(vm->arenas[id].capacity, sizeof(int));
     }
@@ -258,7 +275,15 @@ void vm_cleanup(VM* vm) {
     if (vm->constants) { free(vm->constants); vm->constants = NULL; }
 
     for (int i = 0; i < MAX_ARENAS; i++) free_arena(vm, i);
-    if (vm->string_pool) { free(vm->string_pool); vm->string_pool = NULL; }
+    if (vm->string_pool) {
+        for (int i = 0; i < vm->str_count; i++) free(vm->string_pool[i]);
+        free(vm->string_pool);
+        vm->string_pool = NULL;
+    }
+    if (vm->scratch) { free(vm->scratch); vm->scratch = NULL; }
+    if (vm->file_ids) { free(vm->file_ids); vm->file_ids = NULL; }
+    if (vm->source_files) { free(vm->source_files); vm->source_files = NULL; }
+    vm->source_file_count = 0;
 
     for (int i = 0; i < ref_next_id; i++) {
         if (ref_store[i].is_copy && ref_store[i].ptr) free(ref_store[i].ptr);
@@ -287,11 +312,13 @@ void vm_init(VM* vm) {
         vm->ip = 0;
         vm->fp = 0;
         vm->code_size = 0;
+        for (int i = 0; i < vm->str_count; i++) { free(vm->string_pool[i]); vm->string_pool[i] = NULL; }
         vm->str_count = 0;
         vm->const_count = 0;
         vm->function_count = 0;
         vm->output_mem_pos = 0;
         vm->output_char_buffer[0] = '\0';
+        vm->source_file_count = 0;
         vm->global_symbol_count = 0;
         vm->local_symbol_count = 0;
         vm->cli_debug_mode = false;
@@ -337,27 +364,40 @@ void vm_init(VM* vm) {
         return;
     }
 
-    // Cold Start
-    vm->bytecode = (int*)malloc(MAX_CODE * sizeof(int));
-    vm->lines    = (int*)malloc(MAX_CODE * sizeof(int));
+    // Cold Start: the limits come from the current VM options.
+    vm->stack_capacity = MyloVMOpts.stack_size;
+    vm->max_strings = MyloVMOpts.max_strings;
+    vm->max_string_length = MyloVMOpts.max_string_length;
+    vm->max_code = MyloVMOpts.max_code;
+    vm->max_constants = MyloVMOpts.max_constants;
+    vm->heap_initial = MyloVMOpts.heap_initial;
+    vm->heap_max = MyloVMOpts.heap_max;
 
-    vm->stack       = (double*)calloc(STACK_SIZE, sizeof(double));
-    vm->stack_types = (int*)calloc(STACK_SIZE, sizeof(int));
+    vm->bytecode = (int*)malloc((size_t)vm->max_code * sizeof(int));
+    vm->lines    = (int*)malloc((size_t)vm->max_code * sizeof(int));
+    vm->file_ids = (int*)calloc((size_t)vm->max_code, sizeof(int));
+    vm->source_files = calloc(MAX_SOURCE_FILES, sizeof(*vm->source_files));
+    vm->source_file_count = 0;
+
+    vm->stack       = (double*)calloc((size_t)vm->stack_capacity, sizeof(double));
+    vm->stack_types = (int*)calloc((size_t)vm->stack_capacity, sizeof(int));
     vm->globals      = (double*)calloc(MAX_GLOBALS, sizeof(double));
     vm->global_types = (int*)calloc(MAX_GLOBALS, sizeof(int));
 
-    vm->constants = (double*)malloc(MAX_CONSTANTS * sizeof(double));
-    vm->string_pool = malloc(MAX_STRINGS * MAX_STRING_LENGTH);
+    vm->constants = (double*)malloc((size_t)vm->max_constants * sizeof(double));
+    vm->string_pool = (char**)calloc((size_t)vm->max_strings, sizeof(char*));
+    vm->scratch = (char*)malloc((size_t)vm->max_string_length * 2 + 64);
     memset(vm->arenas, 0, sizeof(vm->arenas));
+
+    if (!vm->bytecode || !vm->lines || !vm->file_ids || !vm->source_files || !vm->stack || !vm->stack_types ||
+        !vm->globals || !vm->global_types || !vm->constants || !vm->string_pool || !vm->scratch) {
+        fprintf(stderr, "Critical Error: Failed to allocate VM memory. Check the sizes in mylovm.conf.\n");
+        mylo_exit(1);
+    }
 
     init_arena(vm, 0);
     vm->current_arena = 0;
     vm->arena_sp = 0;
-
-    if (!vm->bytecode || !vm->stack) {
-        fprintf(stderr, "Critical Error: Failed to allocate VM memory\n");
-        mylo_exit(1);
-    }
 
     vm->sp = -1;
     vm->ip = 0;
@@ -386,8 +426,19 @@ double heap_alloc(VM* vm, int size) {
     if (!vm->arenas[id].active) init_arena(vm, id);
 
     if (vm->arenas[id].head + size >= vm->arenas[id].capacity) {
-        int new_cap = vm->arenas[id].capacity * 2;
-        if (new_cap < vm->arenas[id].head + size + 1024) new_cap = vm->arenas[id].head + size + 1024;
+        // An offset has PTR_OFFSET_BITS bits, so an arena can't address more than that.
+        long long limit = MAX_ARENA_SLOTS;
+        if (vm->heap_max > 0 && vm->heap_max < limit) limit = vm->heap_max;
+        long long needed = (long long)vm->arenas[id].head + size + 1;
+        if (size < 0 || needed > limit) {
+            if (vm->heap_max > 0 && vm->heap_max < MAX_ARENA_SLOTS)
+                mylo_limit_error(vm, "Out of memory: an arena reached its size limit", "heap_max", vm->heap_max);
+            mylo_runtime_error(vm, "Out of memory: an arena can't hold more than %d slots", MAX_ARENA_SLOTS);
+        }
+        long long grown = (long long)vm->arenas[id].capacity * 2;
+        if (grown < needed + 1024) grown = needed + 1024;
+        if (grown > limit) grown = limit;
+        int new_cap = (int)grown;
         double* new_mem = (double*)realloc(vm->arenas[id].memory, new_cap * sizeof(double));
         int* new_types = (int*)realloc(vm->arenas[id].types, new_cap * sizeof(int));
         if (!new_mem || !new_types) {
@@ -406,7 +457,7 @@ double heap_alloc(VM* vm, int size) {
 }
 
 void vm_push(VM* vm, double val, int type) {
-    if (vm->sp >= STACK_SIZE - 1) { printf("Error: Stack Overflow\n"); mylo_exit(1);}
+    if (vm->sp >= vm->stack_capacity - 1) mylo_limit_error(vm, "Stack overflow", "stack_size", vm->stack_capacity);
     vm->sp++;
     vm->stack[vm->sp] = val;
     vm->stack_types[vm->sp] = type;
@@ -421,8 +472,17 @@ int make_string(VM* vm, const char *s) {
     for (int j = 0; j < vm->str_count; j++) {
         if (strcmp(vm->string_pool[j], s) == 0) return j;
     }
-    if (vm->str_count >= MAX_STRINGS) { printf("Error: String Pool Overflow\n"); mylo_exit(1);}
-    strncpy(vm->string_pool[vm->str_count], s, MAX_STRING_LENGTH - 1);
+    if (vm->str_count >= vm->max_strings) mylo_limit_error(vm, "String pool overflow", "max_strings", vm->max_strings);
+    size_t len = strlen(s);
+    if (len > (size_t)vm->max_string_length) len = (size_t)vm->max_string_length;
+    char* copy = (char*)malloc(len + 1);
+    if (!copy) {
+        fprintf(stderr, "Critical: Out of memory storing a string\n");
+        mylo_exit(1);
+    }
+    memcpy(copy, s, len);
+    copy[len] = '\0';
+    vm->string_pool[vm->str_count] = copy;
     return vm->str_count++;
 }
 
@@ -430,8 +490,56 @@ int make_const(VM* vm, double val) {
     for (int i = 0; i < vm->const_count; i++) {
         if (vm->constants[i] == val) return i;
     }
+    if (vm->const_count >= vm->max_constants) mylo_limit_error(vm, "Too many constants", "max_constants", vm->max_constants);
     vm->constants[vm->const_count] = val;
     return vm->const_count++;
+}
+
+const char* vm_string(VM* vm, int id) {
+    if (!vm || !vm->string_pool || id < 0 || id >= vm->str_count || !vm->string_pool[id]) return "";
+    return vm->string_pool[id];
+}
+
+int vm_add_source_file(VM* vm, const char* path) {
+    if (!vm->source_files) return 0;
+    for (int i = 0; i < vm->source_file_count; i++) {
+        if (strcmp(vm->source_files[i], path) == 0) return i;
+    }
+    if (vm->source_file_count >= MAX_SOURCE_FILES) return 0;
+    snprintf(vm->source_files[vm->source_file_count], MYLO_VM_PATH_LENGTH, "%s", path);
+    return vm->source_file_count++;
+}
+
+const char* vm_source_file_at(VM* vm, int ip) {
+    if (!vm->file_ids || !vm->source_files || ip < 0 || ip >= vm->code_size) return "";
+    int id = vm->file_ids[ip];
+    if (id < 0 || id >= vm->source_file_count) return "";
+    return vm->source_files[id];
+}
+
+// Writes a value's text for string joining, into at most cap bytes.
+static void string_operand(VM* vm, double v, int t, char* out, size_t cap) {
+    if (t == T_STR) snprintf(out, cap, "%s", vm_string(vm, (int)v));
+    else if (t == T_ENUM) snprintf(out, cap, "%s", vm_string(vm, (int)(((unsigned long long)v >> 16) & 0xFFFF)));
+    else snprintf(out, cap, "%g", v);
+}
+
+// Joins two values into a new interned string, using the VM's scratch buffer.
+static int join_strings(VM* vm, double a, int ta, double b, int tb) {
+    // Each half holds up to max_string_length bytes plus room for a formatted number.
+    size_t half = (size_t)vm->max_string_length + 32;
+    char* left = vm->scratch;
+    char* right = vm->scratch + half;
+    string_operand(vm, a, ta, left, half);
+    string_operand(vm, b, tb, right, half);
+    size_t max = (size_t)vm->max_string_length;
+    size_t ll = strlen(left);
+    size_t rl = strlen(right);
+    if (ll > max) ll = max;
+    if (ll + rl > max) rl = max - ll;
+    memmove(left + ll, right, rl);
+    left[ll + rl] = '\0';
+    return make_string(vm, left);
 }
 
 void vm_register_function(VM* vm, const char* name, int addr) {
@@ -1009,9 +1117,7 @@ static void broadcast_math(VM* vm, int op, double obj_val, double scalar_val, in
         else if (op == OP_ADD && scalar_type == T_STR && elType == T_STR) {
              double lhs = obj_is_lhs ? el : scalar_val;
              double rhs = obj_is_lhs ? scalar_val : el;
-             char buf[MAX_STRING_LENGTH * 2];
-             snprintf(buf, sizeof(buf), "%s%s", vm->string_pool[(int)lhs], vm->string_pool[(int)rhs]);
-             int id = make_string(vm, buf);
+             int id = join_strings(vm, lhs, T_STR, rhs, T_STR);
              newBase[HEAP_HEADER_ARRAY+i] = (double)id;
              newTypes[HEAP_HEADER_ARRAY+i] = T_STR;
         }
@@ -1078,9 +1184,7 @@ static void exec_math_op(VM* vm, int op) {
         return;
     }
     if (op == OP_ADD && ta == T_STR && tb == T_STR) {
-        char buf[MAX_STRING_LENGTH * 2];
-        snprintf(buf, sizeof(buf), "%s%s", vm->string_pool[(int)a], vm->string_pool[(int)b]);
-        int id = make_string(vm, buf);
+        int id = join_strings(vm, a, T_STR, b, T_STR);
         vm->stack[vm->sp] = (double)id;
         vm->stack_types[vm->sp] = T_STR;
         return;
@@ -1183,21 +1287,7 @@ static void exec_math_op(VM* vm, int op) {
     }
     
     if (op == OP_ADD && (ta == T_STR || tb == T_STR)) {
-        char s1[MAX_STRING_LENGTH], s2[MAX_STRING_LENGTH];
-
-        if (ta == T_STR) strncpy(s1, vm->string_pool[(int)a], MAX_STRING_LENGTH-1);
-        else if (ta == T_ENUM) strncpy(s1, vm->string_pool[((unsigned int)a >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
-        else snprintf(s1, MAX_STRING_LENGTH, "%g", a);
-        s1[MAX_STRING_LENGTH-1] = '\0';
-
-        if (tb == T_STR) strncpy(s2, vm->string_pool[(int)b], MAX_STRING_LENGTH-1);
-        else if (tb == T_ENUM) strncpy(s2, vm->string_pool[((unsigned int)b >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
-        else snprintf(s2, MAX_STRING_LENGTH, "%g", b);
-        s2[MAX_STRING_LENGTH-1] = '\0';
-
-        char res[MAX_STRING_LENGTH * 2];
-        snprintf(res, sizeof(res), "%s%s", s1, s2);
-        int id = make_string(vm, res);
+        int id = join_strings(vm, a, ta, b, tb);
         vm->stack[vm->sp] = (double)id;
         vm->stack_types[vm->sp] = T_STR;
         return;
@@ -1307,6 +1397,8 @@ static void exec_flow_op(VM* vm, int op) {
         int target = vm->bytecode[vm->ip++];
         int argc = vm->bytecode[vm->ip++];
         CHECK_STACK(argc);
+        // The call frame takes two more slots for the return address and frame pointer.
+        if (vm->sp + 2 >= vm->stack_capacity - 1) mylo_limit_error(vm, "Stack overflow", "stack_size", vm->stack_capacity);
         int args_start = vm->sp - argc + 1;
         for(int i=0; i<argc; i++) {
             vm->stack[vm->sp + 2 - i] = vm->stack[vm->sp - i];
@@ -1608,8 +1700,8 @@ static void exec_slice_op(VM* vm, int op) {
             if (end >= len) end = len - 1;
             int newlen = (end >= start) ? (end - start + 1) : 0;
             if (start >= len) newlen = 0;
-            char sub[MAX_STRING_LENGTH];
-            if (newlen >= MAX_STRING_LENGTH) newlen = MAX_STRING_LENGTH - 1;
+            char* sub = vm->scratch;
+            if (newlen > vm->max_string_length) newlen = vm->max_string_length;
             if (newlen > 0) memcpy(sub, str_val + start, newlen);
             sub[newlen] = '\0';
             int sid = make_string(vm, sub);
@@ -1993,21 +2085,7 @@ int vm_step(VM* vm, bool debug_trace) {
             CHECK_STACK(2);
             double b = vm_pop(vm); int bt = vm->stack_types[vm->sp + 1];
             double a = vm->stack[vm->sp]; int at = vm->stack_types[vm->sp];
-            char s1[MAX_STRING_LENGTH], s2[MAX_STRING_LENGTH];
-
-            if (at == T_STR) strncpy(s1, vm->string_pool[(int)a], MAX_STRING_LENGTH-1);
-            else if (at == T_ENUM) strncpy(s1, vm->string_pool[((unsigned long long)a >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
-            else snprintf(s1, MAX_STRING_LENGTH, "%g", a);
-            s1[MAX_STRING_LENGTH-1] = '\0';
-
-            if (bt == T_STR) strncpy(s2, vm->string_pool[(int)b], MAX_STRING_LENGTH-1);
-            else if (bt == T_ENUM) strncpy(s2, vm->string_pool[((unsigned long long)b >> 16) & 0xFFFF], MAX_STRING_LENGTH-1);
-            else snprintf(s2, MAX_STRING_LENGTH, "%g", b);
-            s2[MAX_STRING_LENGTH-1] = '\0';
-
-            char res[MAX_STRING_LENGTH * 2];
-            snprintf(res, sizeof(res), "%s%s", s1, s2);
-            int id = make_string(vm, res);
+            int id = join_strings(vm, a, at, b, bt);
             vm->stack[vm->sp] = (double)id;
             vm->stack_types[vm->sp] = T_STR;
             break;

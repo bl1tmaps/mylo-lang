@@ -701,6 +701,9 @@ inline TestOutput test_enums() {
 inline TestOutput test_module_path_and_import() {
 
     std::string src = """"
+#ifdef MYLO_TESTS_DIR
+    "module_path(\"" MYLO_TESTS_DIR "\")\n"
+#endif
     // Assumes run from build
     "module_path(\"../tests/\")\n"
     "module_path(\"tests/\")\n"
