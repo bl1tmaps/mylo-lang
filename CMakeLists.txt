@@ -82,8 +82,14 @@ option(MODULES "Build standalone Mylo modules" OFF)
 if(MODULES)
   message(STATUS "Modules build flag enabled. Configuring plugins...")
 
-  # Automatically build the GTK module if the directory exists
-  if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/modules/gtk")
+  # The GTK module needs GTK3 installed (found through pkg-config), so it's skipped without it.
+  find_package(PkgConfig QUIET)
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(MYLO_GTK3 QUIET gtk+-3.0)
+  endif()
+  if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/modules/gtk" AND NOT MYLO_GTK3_FOUND)
+    message(STATUS "Skipping module: GTK3 Bridge (GTK3 not found)")
+  elseif(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/modules/gtk")
     message(STATUS "Configuring module: GTK3 Bridge")
 
     # Ensure the module compiles AFTER the main mylo executable is built,

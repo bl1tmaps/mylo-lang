@@ -1,5 +1,5 @@
-# Builds Mylo (mylo, mylo-lsp, mylo-vsproject and Mylo IDE) for Windows, macOS and Linux,
-# runs the tests, and zips each build.
+# Builds Mylo (mylo, mylo-lsp, mylo-vsproject, Mylo IDE and the native modules) for Windows,
+# macOS and Linux, runs the tests, and zips each build.
 #
 #   Pull request    -> build and test on every platform.
 #   Merge to main   -> the same, and the zips are kept as artifacts on the workflow run.
@@ -49,7 +49,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev \
-            libxi-dev libxinerama-dev libxrandr-dev xvfb mesa-utils
+            libxi-dev libxinerama-dev libxrandr-dev xvfb mesa-utils libgtk-3-dev
 
       - name: Version
         id: version
@@ -69,6 +69,7 @@ jobs:
           cmake -B build
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          -DMODULES=ON
           -DMYLO_VERSION_SUFFIX=${{ steps.version.outputs.suffix }}
 
       - name: Compile
