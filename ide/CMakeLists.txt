@@ -57,6 +57,9 @@ add_executable(mylo-ide
     ${MYLO_CORE_SOURCES}
 )
 target_include_directories(mylo-ide PRIVATE src ${IMGUI_DIR} ${MYLO_CORE_DIR})
+if(COMMAND mylo_use_git_version)
+    mylo_use_git_version(mylo-ide)
+endif()
 target_link_libraries(mylo-ide PRIVATE raylib Threads::Threads ${CMAKE_DL_LIBS})
 if(WIN32)
     target_link_libraries(mylo-ide PRIVATE ws2_32)
