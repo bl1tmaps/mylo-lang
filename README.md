@@ -1,4 +1,4 @@
-![A Derpy Logo](docs/mylogo.png)
+![A Derpy Logo](docs/mylo.svg)
 # Mylo
 
 Mylo is an experimental language implemented in C, that uses a simple VM and has cool syntax. It has almost seamless C-interoperability.
