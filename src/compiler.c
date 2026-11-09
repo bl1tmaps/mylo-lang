@@ -3352,7 +3352,7 @@ void parse_function_body(char* registered_name, char* mangled_name, int implicit
         }
     }
 
-    while (curr.type != TK_RBRACE) statement();
+    while (curr.type != TK_RBRACE && curr.type != TK_EOF) statement();
     emit(OP_SCOPE_EXIT); current_scope_depth--;
     match(TK_RBRACE);
     emit(OP_PSH_NUM);

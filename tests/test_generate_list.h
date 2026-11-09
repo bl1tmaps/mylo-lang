@@ -1612,6 +1612,12 @@ inline TestOutput test_same_scope_redecl_error() {
     return run_error_test("x: string = \"foo\"\nx: u32 = 4\n");
 }
 
+// A file ending inside a function body must report an error, not loop forever
+// (the IDE parses half-typed buffers on every keystroke).
+inline TestOutput test_unclosed_function_error() {
+    return run_error_test("fn foo() {\n    print(\"hi\")\n");
+}
+
 inline TestOutput test_arena_scope_error() {
     return run_error_test("{[my_arena]\nx : u32 = 5\n}\nprint(x)\n");
 }
@@ -1985,6 +1991,7 @@ inline void test_generate_list() {
     ADD_TEST("Test Out of Scope Error", test_out_of_scope_error);
     ADD_TEST("Test Unannotated Declaration Error", test_unannotated_declaration_error);
     ADD_TEST("Test Same Scope Redeclaration Error", test_same_scope_redecl_error);
+    ADD_TEST("Test Unclosed Function Error", test_unclosed_function_error);
     ADD_TEST("Test Arena Scope Error", test_arena_scope_error);
     ADD_TEST("Test Arena Execution", test_arena_execution);
     ADD_TEST("Test All Strict Types", test_all_strict_types);
