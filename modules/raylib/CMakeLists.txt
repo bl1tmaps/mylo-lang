@@ -94,6 +94,9 @@ add_executable(my_game
 target_include_directories(my_game PRIVATE "${MYLO_ROOT}/src")
 target_link_libraries(my_game PRIVATE raylib)
 
-if(NOT WIN32)
+if(WIN32)
+    # The VM and debug adapter use Winsock.
+    target_link_libraries(my_game PRIVATE ws2_32)
+else()
     target_link_libraries(my_game PRIVATE m)
 endif()

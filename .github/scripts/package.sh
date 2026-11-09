@@ -39,10 +39,38 @@ cp -R "$ide_dir/assets" "$package/"
 cp -R examples docs editors "$package/"
 cp README.md LICENSE.txt tutorial.md "$package/"
 
-# Modules ship as source; leave out anything a local build left behind.
+# Copy the module sources, leaving out anything a local build left behind.
 cp -R modules "$package/"
 find "$package/modules" -type d \( -name Debug -o -name Release -o -name 'build*' -o -name 'raylib-*' -o -name '_deps' \) -prune -exec rm -rf {} +
 find "$package/modules" -type f \( -name '*.dll' -o -name '*.so' -o -name '*.dylib' -o -name '*.obj' -o -name '*.o' -o -name '*.exe' \) -delete
+
+# Each built native module goes next to its .mylo file, which is where `import native` loads it from.
+if [[ "$platform" == windows-* ]]; then
+    module_ext=dll
+else
+    module_ext=so
+fi
+# Usage: add_module <module folder> <library name> <required: yes/no>
+add_module() {
+    local dir="$1" lib="$2" required="$3" built
+    # Most modules build into build/modules/<dir>; pixel_window builds into its source folder.
+    built=$(find "build/modules/$dir" "modules/$dir" -name "$lib.$module_ext" -not -path '*/_deps/*' 2>/dev/null | head -n 1 || true)
+    if [[ -z "$built" ]]; then
+        if [[ "$required" == yes ]]; then
+            echo "error: no built $lib.$module_ext for modules/$dir (configure with -DMODULES=ON)" >&2
+            exit 1
+        fi
+        echo "Skipping $lib.$module_ext (not built)"
+        return
+    fi
+    cp "$built" "$package/modules/$dir/"
+    echo "Packaged $built -> modules/$dir/"
+}
+add_module raylib raylib_binding yes
+add_module pixel_window pixel_window yes
+# GTK is only installed on the Linux runner.
+if [[ "$platform" == linux-* ]]; then gtk_required=yes; else gtk_required=no; fi
+add_module gtk gtk_bridge "$gtk_required"
 
 if [[ "$platform" == windows-* ]]; then
     # Bundled so the tools run on PCs without the Visual C++ Redistributable.
@@ -77,6 +105,19 @@ EOF
         exit 1
     fi
     ./mylo-ide$ext --version
+
+    # Load the packaged native modules (no window is opened).
+    printf '%s\n' \
+        'import native "modules/raylib/raylib_binding.mylo"' \
+        'import native "modules/pixel_window/pixel_window.mylo"' \
+        'print("modules loaded")' > modules_smoke.mylo
+    output=$(./mylo$ext modules_smoke.mylo)
+    rm modules_smoke.mylo
+    echo "$output"
+    if [[ "$output" != "modules loaded" ]]; then
+        echo "error: the module smoke script printed '$output', not 'modules loaded'" >&2
+        exit 1
+    fi
 )
 rm -rf "$smoke_dir"
 
