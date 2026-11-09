@@ -87,6 +87,8 @@ add_executable(my_game
     "${MYLO_ROOT}/src/mylolib.c"
     "${MYLO_ROOT}/src/utils.c"
     "${MYLO_ROOT}/src/debug_adapter.c"
+    "${MYLO_ROOT}/src/compiler.c"
+    "${MYLO_ROOT}/src/vm_options.c"
 )
 
 target_include_directories(my_game PRIVATE "${MYLO_ROOT}/src")
